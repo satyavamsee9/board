@@ -13,82 +13,208 @@
 <title>Claude sessions</title>
 <style>
 :root {
-  --bg:#f6f6f3; --card:#fff; --ink:#1c1c1e; --muted:#6c6c72; --line:#e2e2dd; --hover:#f0f0ea;
-  --needs:#c2271c; --working:#1769d1; --waiting:#3f7d22; --stopped:#b56a00; --recent:#8a8a90; --accent:#1769d1; --fresh:#e06c00;
+  --bg:#f5f5f2; --card:#fff; --ink:#1c1c1e; --muted:#6a6a70; --faint:#9a9aa0; --line:#e3e3de; --hover:#f4f4ef; --chip:#efefea;
+  --needs:#c8281d; --done:#2e7d32; --working:#1769d1; --stopped:#b26500; --idle:#8a8a90; --accent:#1769d1; --fresh:#e06c00;
+  --shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.05); --pop:0 8px 30px rgba(0,0,0,.16);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#151517; --card:#1f1f22; --ink:#ededf0; --muted:#9b9ba2; --line:#2f2f34; --hover:#28282c;
-    --needs:#ff6b60; --working:#5aa3ff; --waiting:#86cc63; --stopped:#f2a33a; --recent:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c; }
+  :root { --bg:#141416; --card:#1d1d20; --ink:#ececef; --muted:#a0a0a7; --faint:#77777e; --line:#2e2e33; --hover:#26262a; --chip:#2a2a2f;
+    --needs:#ff6b60; --done:#7fcb62; --working:#5aa3ff; --stopped:#f2a33a; --idle:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25); --pop:0 8px 30px rgba(0,0,0,.5); }
 }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
-body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-main { max-width:1100px; margin:0 auto; padding:18px 16px 48px; }
-header { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; }
-h1 { font-size:21px; margin:0; }
-.sub { color:var(--muted); font-size:13px; }
-.bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 4px; padding:10px 12px;
-  background:var(--card); border:1px solid var(--line); border-radius:10px; }
-.bar input[type=text] { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
-.bar input.name { width:170px; } .bar input.folder { flex:1; min-width:220px; }
-button { font:inherit; cursor:pointer; }
-.primary { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; }
-.ghost { background:none; border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:4px 10px; }
-h2 { font-size:15px; margin:22px 0 8px; display:flex; align-items:center; gap:8px; }
-h2 .count { color:var(--muted); font-weight:400; }
-.note { color:var(--muted); font-size:13px; margin:-4px 0 8px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
-.card { text-align:left; width:100%; background:var(--card); color:var(--ink); border:1px solid var(--line);
-  border-left:4px solid var(--recent); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
-.card:hover { background:var(--hover); }
-.card.needs_you { border-left-color:var(--needs); } .card.working { border-left-color:var(--working); }
-.card.done { border-left-color:var(--waiting); } .card.idle { border-left-color:var(--recent); }
-.card.stopped { border-left-color:var(--stopped); }
-.card.fresh { box-shadow:0 0 0 2px var(--fresh); }
-.newtag { font-size:11px; font-weight:700; color:#fff; background:var(--fresh); border-radius:6px; padding:1px 6px; }
-.top { display:flex; align-items:center; gap:8px; }
-.dot { width:10px; height:10px; border-radius:50%; background:var(--recent); flex:none; }
-.needs_you .dot { background:var(--needs); animation:pulse 1.2s infinite; }
-.working .dot { background:var(--working); animation:pulse 1.6s infinite; }
-.done .dot { background:var(--waiting); animation:pulse 1.2s infinite; } .idle .dot { background:var(--recent); }
-.stopped .dot { background:var(--stopped); }
-@keyframes pulse { 50% { opacity:.35; } }
-.name { font-weight:600; overflow-wrap:anywhere; }
-.state { font-size:13px; font-weight:600; }
-.needs_you .state { color:var(--needs); } .working .state { color:var(--working); }
-.done .state { color:var(--waiting); } .idle .state { color:var(--muted); font-weight:400; } .stopped .state { color:var(--stopped); } .recent .state { color:var(--recent); }
-.meta { display:flex; flex-wrap:wrap; gap:2px 10px; color:var(--muted); font-size:12.5px; }
-.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; overflow-wrap:anywhere; }
-.action { margin-top:2px; font-size:12.5px; color:var(--accent); }
+body { margin:0; background:var(--bg); color:var(--ink); font:14.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { max-width:1120px; margin:0 auto; padding:20px 16px 40px; }
+button { font:inherit; cursor:pointer; color:inherit; }
 a { color:var(--accent); }
-.empty { color:var(--muted); }
-.warn { color:var(--needs); font-size:13px; }
-#toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--ink); color:var(--bg);
-  padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; }
-#toast.show { opacity:.95; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+
+/* Header: title, live state and this tab's counts on the left; usage on the right. */
+header { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; }
+h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
+.live { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); }
+.live::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--faint); }
+.live.ok::before { background:var(--done); }
+.live.bad { color:var(--needs); } .live.bad::before { background:var(--needs); }
+.attn { display:flex; flex-wrap:wrap; gap:6px; }
+.pill { font-size:12.5px; font-weight:600; border-radius:999px; padding:2px 9px; border:0; color:var(--c);
+  background:color-mix(in srgb, var(--c) 15%, transparent); }
+button.pill:hover { background:color-mix(in srgb, var(--c) 25%, transparent); }
+.grow { flex:1; }
+.usage { display:flex; gap:14px; }
+.meter { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); }
+.mbar { width:64px; height:6px; border-radius:3px; background:var(--chip); overflow:hidden; }
+.mbar i { display:block; height:100%; background:var(--working); border-radius:3px; }
+.meter.warm .mbar i { background:var(--stopped); } .meter.hot .mbar i { background:var(--needs); }
+.primary { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:6px 12px; font-weight:600; }
+.danger { background:var(--needs); color:#fff; border:0; border-radius:8px; padding:6px 12px; font-weight:600; }
+.ghost { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-size:13px; }
+.ghost:hover { background:var(--hover); }
+
+/* Tabs: Work and Personal. */
+.tabs { display:flex; gap:4px; margin:16px 0 0; border-bottom:1px solid var(--line); }
+.tab { display:inline-flex; align-items:center; gap:7px; background:none; border:0; border-bottom:2px solid transparent;
+  margin-bottom:-1px; padding:7px 12px 8px; color:var(--muted); font-weight:600; }
+.tab:hover { color:var(--ink); }
+.tab[aria-selected="true"] { color:var(--ink); border-bottom-color:var(--accent); }
+.tcount { font-weight:600; font-size:12px; color:var(--faint); }
+.tdot { width:8px; height:8px; border-radius:50%; background:var(--c); }
+
+.tools { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:14px 0 0; }
+.tools input { font:inherit; flex:1 1 220px; max-width:380px; min-width:0; padding:7px 11px; border:1px solid var(--line); border-radius:9px;
+  background:var(--card); color:var(--ink); }
+.calm { color:var(--muted); margin:22px 0 0; }
+.calm button { margin-left:6px; }
+.warn { color:var(--needs); font-size:13px; margin:10px 0 0; }
+
+/* New session, opened from its button. */
+.panel { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0 0; padding:12px;
+  background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
+.panel input[type=text] { font:inherit; padding:6px 9px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
+.panel input.nm { width:200px; } .panel input.folder { flex:1; min-width:220px; }
+.panel label { font-size:13px; color:var(--muted); }
+
+/* Groups */
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:24px 0 8px;
+  display:flex; align-items:center; gap:8px; }
+h2 .count { font-weight:600; color:var(--faint); }
+.note { color:var(--muted); font-size:12.5px; margin:-4px 0 8px; }
 details > summary { cursor:pointer; list-style:none; }
 details > summary::-webkit-details-marker { display:none; }
+details > summary h2::before { content:"▸"; font-size:11px; }
+details[open] > summary h2::before { content:"▾"; }
+
+/* Each state has one colour: --c. */
+.needs_you { --c:var(--needs); } .done { --c:var(--done); } .working { --c:var(--working); }
+.stopped { --c:var(--stopped); } .idle, .recent { --c:var(--idle); }
+
+/* Cards: sessions that need you, are done, working or stopped. */
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap:10px; margin-top:18px; }
+.card { position:relative; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:11px 14px 11px 16px;
+  display:grid; grid-template-columns:minmax(0, 1fr); min-width:0; gap:5px; cursor:pointer; box-shadow:var(--shadow);
+  transition:border-color .12s; outline:none; }
+.card::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--c); }
+.card:hover, .card:focus-visible, .card.menu-on { border-color:color-mix(in srgb, var(--c) 50%, var(--line)); }
+.card:focus-visible { box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+.card.fresh { box-shadow:0 0 0 2px var(--fresh), var(--shadow); }
+.top { display:flex; align-items:flex-start; gap:9px; padding-right:26px; }
+.num { flex:none; min-width:24px; height:21px; padding:0 6px; border-radius:6px; background:var(--chip); color:var(--muted);
+  font:600 12px/21px ui-monospace,SFMono-Regular,Menlo,monospace; text-align:center; }
+.num.text { font:500 11px/21px -apple-system,BlinkMacSystemFont,sans-serif; }
+.name { font-weight:600; flex:1; min-width:0; line-height:1.35; overflow-wrap:anywhere; }
+.newtag { font-size:10.5px; font-weight:700; color:#fff; background:var(--fresh); border-radius:5px; padding:1px 5px; align-self:center; }
+.status { display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:var(--c); }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--c); flex:none; }
+.needs_you .dot, .done .dot { animation:pulse 1.2s infinite; } .working .dot { animation:pulse 1.6s infinite; }
+@keyframes pulse { 50% { opacity:.3; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation:none !important; } }
+.meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; color:var(--muted); font-size:12.5px; }
+.pr { font:500 11.5px/18px ui-monospace,SFMono-Regular,Menlo,monospace; padding:0 6px; border-radius:5px; background:var(--chip);
+  color:var(--accent); text-decoration:none; }
+.pr:hover { text-decoration:underline; }
+.sub { color:var(--faint); font:12px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+
+/* "Open ↗" and the ⋯ button show on hover; on touch screens the ⋯ always shows. */
+.go { font-size:12px; color:var(--accent); opacity:0; transition:opacity .12s; white-space:nowrap; }
+.card .go { position:absolute; right:12px; bottom:10px; padding-left:12px; background:var(--card); }
+.more { width:26px; height:24px; border:0; border-radius:6px; background:none; color:var(--muted); font-size:16px; line-height:1;
+  opacity:0; transition:opacity .12s; }
+.more:hover, .menu-on .more { background:var(--chip); color:var(--ink); }
+.card .more { position:absolute; top:9px; right:8px; }
+.card:hover .go, .card:focus-visible .go, .row:hover .go, .row:focus-visible .go,
+.card:hover .more, .row:hover .more, .more:focus-visible, .menu-on .more { opacity:1; }
+@media (hover: none) { .more { opacity:1; } }
+
+/* Rows: idle and closed sessions, one line each. */
+.rows { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
+.row { display:grid; grid-template-columns:34px minmax(0,1fr) auto minmax(0,200px) 64px 96px; align-items:center; gap:10px;
+  padding:6px 8px 6px 12px; border-top:1px solid var(--line); cursor:pointer; outline:none; }
+.row:first-child { border-top:0; }
+.row:hover, .row:focus-visible, .row.menu-on { background:var(--hover); }
+.row .name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row .prs { display:flex; gap:4px; }
+.row .when { color:var(--muted); font-size:12.5px; text-align:right; white-space:nowrap; }
+.row .act { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
+@media (max-width:760px) {
+  .row { grid-template-columns:34px minmax(0,1fr) auto 56px 30px; }
+  .row .sub, .row .go { display:none; }
+  .row .prs a:nth-child(n+2) { display:none; }
+  .usage { order:5; width:100%; }
+}
+
+/* The ⋯ menu, and the Rename and Stop dialogs. */
+.menu { position:fixed; z-index:20; min-width:200px; padding:5px; background:var(--card); border:1px solid var(--line);
+  border-radius:10px; box-shadow:var(--pop); }
+.menu button { display:block; width:100%; text-align:left; background:none; border:0; border-radius:6px; padding:6px 10px; font-size:13.5px; }
+.menu button:hover, .menu button:focus-visible { background:var(--hover); outline:none; }
+.menu button.bad { color:var(--needs); }
+.menu hr { border:0; border-top:1px solid var(--line); margin:4px 2px; }
+dialog { border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--ink); padding:18px 18px 14px;
+  width:min(440px, calc(100vw - 32px)); box-shadow:var(--pop); }
+dialog::backdrop { background:rgba(0,0,0,.28); }
+dialog h3 { margin:0 0 6px; font-size:16px; }
+dialog p { margin:0 0 10px; color:var(--muted); font-size:13.5px; }
+dialog p.what { color:var(--ink); font-weight:600; }
+dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg);
+  color:var(--ink); margin:2px 0 12px; }
+.dlgbtns { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+.dlgbtns .left { margin-right:auto; }
+
+.empty { color:var(--muted); }
+.keys { color:var(--faint); font-size:12px; margin-top:28px; }
+.keys .mono { background:var(--chip); border-radius:4px; padding:0 4px; color:var(--muted); }
+#toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--ink); color:var(--bg);
+  padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; z-index:30; }
+#toast.show { opacity:.95; }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>Claude sessions</h1>
-    <span class="sub" id="summary">Loading…</span>
-    <span style="flex:1"></span>
-    <button class="ghost" id="alerts" title="Notify me when a session needs me or finishes">Alerts: off</button>
+    <span class="live" id="live">Connecting…</span>
+    <span class="attn" id="attn"></span>
+    <span class="grow"></span>
+    <span class="usage" id="usage" hidden></span>
   </header>
 
-  <form class="bar" id="newform" autocomplete="off">
-    <strong>New session</strong>
-    <input type="text" class="name" id="newname" placeholder="short name, e.g. fix-login" required>
+  <nav class="tabs" id="tabs" role="tablist" hidden>
+    <button class="tab" type="button" role="tab" data-space="work">Work <span class="tcount"></span><span class="tdot" hidden></span></button>
+    <button class="tab" type="button" role="tab" data-space="personal">Personal <span class="tcount"></span><span class="tdot" hidden></span></button>
+  </nav>
+
+  <div class="tools" id="tools" hidden>
+    <input type="search" id="filter" placeholder="Filter by name, branch, PR or window ( / )" aria-label="Filter sessions">
+    <span class="grow"></span>
+    <button class="ghost" id="alerts" type="button" title="Notify me when a session needs me or finishes">Alerts: off</button>
+    <button class="primary" id="newbtn" type="button" title="Start a new Claude session in tmux (n)">+ New session</button>
+  </div>
+
+  <form class="panel" id="newform" autocomplete="off" hidden>
+    <input type="text" class="nm" id="newname" placeholder="short name, e.g. fix-login" aria-label="Name" required>
     <input type="text" class="folder" id="newfolder" value="" placeholder="folder" aria-label="Folder">
-    <label class="sub"><input type="checkbox" id="newwt"> own worktree</label>
+    <label><input type="checkbox" id="newwt"> own worktree</label>
     <button class="primary" type="submit">Start in tmux</button>
+    <button class="ghost" type="button" id="newcancel">Cancel</button>
   </form>
   <p class="warn" id="warn" hidden></p>
   <div id="groups"></div>
+  <p class="keys" id="keys" hidden>Keys: type a window number, like <span class="mono">5</span>, to open it ·
+    <span class="mono">/</span> filter · <span class="mono">n</span> new session · right-click a session for more · <span class="mono">Esc</span> clear</p>
 </main>
+<div class="menu" id="menu" role="menu" hidden></div>
+<dialog id="dlg" aria-labelledby="dlgtitle">
+  <h3 id="dlgtitle"></h3>
+  <p class="what" id="dlgwhat"></p>
+  <p id="dlgtext"></p>
+  <input type="text" id="dlginput" maxlength="80" aria-label="Name" hidden>
+  <div class="dlgbtns">
+    <button class="ghost left" type="button" id="dlgextra" hidden></button>
+    <button class="ghost" type="button" id="dlgcancel">Cancel</button>
+    <button class="primary" type="button" id="dlgok">OK</button>
+  </div>
+</dialog>
 <div id="toast" role="status"></div>
 
 <script>
@@ -109,24 +235,44 @@ if (!LOCAL) {
 }
 const UNREACHABLE = LOCAL ? "Board server not reachable. Run: board up"
   : "Can't reach the board on this Mac. Start it with t u. If the browser asked about apps and services on this device, choose Allow.";
-const GROUPS = [
-  ["needs_you", "Needs you", "Asking a question or for permission, or the last turn failed."],
-  ["done", "Done, not looked at yet", "Finished its work since you last looked at it. Click to open it."],
-  ["working", "Working", ""],
-  ["idle", "Idle", "Finished, and you've seen it. Nothing to do until you want it again."],
-  ["stopped", "Stopped mid-work", "Not running and didn't exit cleanly (a restart, a crash, a closed terminal). Click to resume it in tmux."],
+// Cards, most urgent first, for sessions that want a look or are running; one-line rows for the rest.
+const CARD_GROUPS = ["needs_you", "done", "working", "stopped"];
+const ROW_GROUPS = [
+  ["idle", "Idle", "Finished, and you've seen it."],
   ["recent", "Recently closed", "Click to resume in tmux."],
 ];
-const STATE_TEXT = { needs_you:"Needs you", failed:"Last turn failed", working:"Working", done:"Done, not looked at yet", idle:"Idle",
+const STATE_HELP = {
+  needs_you: "Asking a question or for permission, or the last turn failed.",
+  done: "Finished its work since you last looked at it.",
+  stopped: "Not running and didn't exit cleanly (a restart, a crash, a closed terminal). Click to resume it in tmux.",
+};
+const PILLS = [
+  ["needs_you", n => n + (n > 1 ? " need" : " needs") + " you"],
+  ["done", n => n + " done"],
+  ["working", n => n + " working"],
+  ["stopped", n => n + " stopped"],
+];
+const STATE_TEXT = { needs_you:"Needs you", failed:"Last turn failed", working:"Working", done:"Done", idle:"Idle",
   stopped:"Stopped mid-work", closed:"Closed", untracked:"Not running" };
+// What stopping a session would cut short, in the words `t k` uses.
+const STOP_WARN = {
+  working: "Claude is working in it right now; that work stops where it is.",
+  needs_you: "Claude is waiting for your answer in it.",
+  done: "Claude finished in it, and you haven't looked at it yet.",
+};
+const SPACES = { work: "Work", personal: "Personal" };
+const FAVICON = { needs_you:"#d93025", done:"#2e7d32", working:"#1769d1", stopped:"#b26500" };
+const CONTROLS = ["usage", "tabs", "tools", "keys"];
 
 let prev = null;
 const fresh = new Set();  // sessions that made a sound and haven't been looked at since
-let lastKey = "", lastDraw = 0;
+let lastKey = "", lastDraw = 0, lastData = null;
 let recentOpen = false;
 let alertsOn = false;
 let appRunning = false;
+let tab = "work";
 try { alertsOn = localStorage.getItem("alerts") === "on"; } catch (e) {}
+try { if (SPACES[localStorage.getItem("boardTab")]) tab = localStorage.getItem("boardTab"); } catch (e) {}
 
 function ago(epoch) {
   if (!epoch) return "";
@@ -152,12 +298,32 @@ function toast(msg) {
   toast.timer = setTimeout(() => t.classList.remove("show"), 3500);
 }
 
+function setLive(ok, text) {
+  const l = document.getElementById("live");
+  l.className = "live " + (ok ? "ok" : "bad");
+  l.textContent = text;
+}
+
+const spaceOf = s => (SPACES[s.space] ? s.space : "work");
+
+// A dot in the browser tab, coloured by the most urgent state, so a background tab still tells you.
+function favicon(group) {
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.append(link); }
+  const fill = FAVICON[group] || "#8a8a90";
+  link.href = "data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="' + fill + '"/></svg>');
+}
+
 // The public page without a working key: say how to connect, and show nothing else.
 function showConnect(why) {
+  CONTROLS.forEach(id => { document.getElementById(id).hidden = true; });
   document.getElementById("newform").hidden = true;
-  document.getElementById("alerts").hidden = true;
-  document.getElementById("summary").textContent = "";
+  document.getElementById("attn").textContent = "";
+  closeMenu();
+  setLive(false, "Not connected");
   document.title = "Claude sessions";
+  favicon("");
   const root = document.getElementById("groups");
   root.textContent = "";
   const p = el("p", "empty");
@@ -191,6 +357,10 @@ async function post(path, body) {
       }
       return;
     }
+    if (r.status === 404 && j.error === "not found") {
+      toast("The board server is older than this page. Restart it: t u");
+      return;
+    }
     toast(j.message || j.error || (r.ok ? "Done" : "Failed"));
     setTimeout(load, 800);
   } catch (e) {
@@ -198,59 +368,333 @@ async function post(path, body) {
   }
 }
 
-function card(s) {
-  const running = s.where && s.where.kind !== "none";
-  const b = el("button", "card " + s.group);
-  b.type = "button";
-  const top = el("div", "top");
-  top.append(el("span", "dot"), el("span", "name", s.name));
-  if (fresh.has(s.id)) { b.classList.add("fresh"); top.append(el("span", "newtag", "new")); }
-  b.append(top);
-  let state = STATE_TEXT[s.status] || s.status;
-  if (s.status_since && (s.group === "needs_you" || s.group === "stopped")) state += " · " + ago(s.status_since);
-  if (s.group === "done" && s.finished_at) state += " · finished " + ago(s.finished_at);
-  b.append(el("div", "state", state));
-  const meta = el("div", "meta");
-  if (s.where) meta.append(el("span", "", s.where.label));
-  if (s.last_activity) meta.append(el("span", "", "active " + ago(s.last_activity)));
-  if (s.branch) meta.append(el("span", "mono", s.branch));
-  meta.append(el("span", "mono", s.id.slice(0, 8)));
-  (s.prs || []).forEach(p => {
-    if (typeof p.url === "string" && p.url.startsWith("https://github.com/")) {
-      const a = el("a", "", "#" + p.number);
-      a.href = p.url; a.target = "_blank"; a.rel = "noopener";
-      a.addEventListener("click", e => e.stopPropagation());
-      meta.append(a);
+// Where the session runs, as a short badge: the tmux window number you'd type after `t`.
+function badge(w) {
+  if (!w || w.kind === "none") return null;
+  if (w.kind === "tmux") return el("span", "num", w.session === "claude" ? w.index : w.session + ":" + w.index);
+  return el("span", "num text", w.kind === "iterm" ? "iTerm" : "bg");
+}
+
+function shortPath(p) { return (p || "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~"); }
+
+// "first.last.TICKET-1.what" shows as "TICKET-1.what"; the tooltip has the full branch.
+function shortBranch(b) { return (b || "").replace(/^[\w-]+(\.[\w-]+)?\.(?=[A-Z][A-Z0-9]+-\d)/, ""); }
+
+function folderOf(space, data) {
+  return ((data && data.folders) || {})[space] || (space === "work" ? (data && data.default_folder) || "" : "");
+}
+
+// The folder, only when it isn't the tab's usual one; then the branch.
+function subline(s, data) {
+  const folder = shortPath(s.cwd);
+  const usual = !folder || folder === folderOf(spaceOf(s), data);
+  const branch = shortBranch(s.branch);
+  const text = usual ? branch : folder + (branch ? "  " + branch : "");
+  const n = el("span", "sub", text);
+  n.title = [s.cwd, s.branch].filter(Boolean).join("\n");
+  return n;
+}
+
+function prLinks(s) {
+  return (s.prs || []).filter(p => typeof p.url === "string" && p.url.startsWith("https://github.com/")).map(p => {
+    const a = el("a", "pr", "#" + p.number);
+    a.href = p.url; a.target = "_blank"; a.rel = "noopener";
+    a.title = "Open PR #" + p.number + " on GitHub";
+    a.addEventListener("click", e => e.stopPropagation());
+    return a;
+  });
+}
+
+const isRunning = s => !!(s.where && s.where.kind !== "none");
+
+function openOrResume(s) { post(isRunning(s) ? "/api/open" : "/api/resume", { id: s.id }); }
+
+// Click opens it; right-click or ⋯ shows the menu.
+function clickable(n, s) {
+  n.tabIndex = 0;
+  n.setAttribute("role", "button");
+  n.title = (isRunning(s) ? "Open its terminal" : "Resume it in tmux") + " · right-click for more";
+  n.addEventListener("click", () => openOrResume(s));
+  n.addEventListener("keydown", e => {
+    if (e.target !== n) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOrResume(s); }
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      const r = n.getBoundingClientRect();
+      openMenu(s, n, r.left + 16, r.top + 28);
     }
   });
-  b.append(meta);
-  b.append(el("div", "action", running ? "Click to open its terminal" : "Click to resume in tmux"));
-  b.addEventListener("click", () => post(running ? "/api/open" : "/api/resume", { id: s.id }));
+  n.addEventListener("contextmenu", e => { e.preventDefault(); openMenu(s, n, e.clientX, e.clientY); });
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.title = "More: rename, stop, copy the resume command";
+  more.setAttribute("aria-label", "More actions for " + s.name);
+  more.setAttribute("aria-haspopup", "menu");
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === s.id) return closeMenu();
+    const r = more.getBoundingClientRect();
+    openMenu(s, n, r.right - 200, r.bottom + 4);
+  });
+  return { go: isRunning(s) ? "Open ↗" : "Resume ↻", more };
+}
+
+function stateText(s) {
+  let t = STATE_TEXT[s.status] || s.status;
+  if (s.status_since && (s.group === "needs_you" || s.group === "stopped" || s.group === "working")) t += " · " + ago(s.status_since).replace(" ago", "");
+  if (s.group === "done" && s.finished_at) t += " · finished " + ago(s.finished_at);
+  return t;
+}
+
+function card(s, data) {
+  const b = el("div", "card " + s.group);
+  b.dataset.id = s.id;
+  const { go, more } = clickable(b, s);
+  const top = el("div", "top");
+  const num = badge(s.where);
+  if (num) top.append(num);
+  top.append(el("span", "name", s.name));
+  if (fresh.has(s.id)) { b.classList.add("fresh"); top.append(el("span", "newtag", "new")); }
+  const status = el("div", "status");
+  status.append(el("span", "dot"), el("span", "", stateText(s)));
+  if (STATE_HELP[s.group]) status.title = STATE_HELP[s.group];
+  const meta = el("div", "meta");
+  meta.append(...prLinks(s));
+  if (s.last_activity) meta.append(el("span", "", "active " + ago(s.last_activity)));
+  b.append(top, status, meta);
+  const sub = subline(s, data);
+  if (sub.textContent) b.append(sub);
+  b.append(el("span", "go", go), more);
   return b;
 }
 
-function draw(data) {
-  const sessions = data.sessions || [];
-  const counts = {};
-  sessions.forEach(s => { counts[s.group] = (counts[s.group] || 0) + 1; });
-  const parts = [];
-  if (counts.needs_you) parts.push(counts.needs_you + " need you");
-  if (counts.done) parts.push(counts.done + " done, not looked at");
-  if (counts.working) parts.push(counts.working + " working");
-  if (counts.idle) parts.push(counts.idle + " idle");
-  if (counts.stopped) parts.push(counts.stopped + " stopped mid-work");
-  const u = data.usage;
-  if (u && u.available) {
-    if (u.session) parts.push("5-hour limit " + u.session.percent + "% used");
-    if (u.weekly) parts.push("weekly " + u.weekly.percent + "%");
+function row(s, data) {
+  const r = el("div", "row " + s.group);
+  r.dataset.id = s.id;
+  const { go, more } = clickable(r, s);
+  const prs = el("span", "prs");
+  prs.append(...prLinks(s));
+  const when = s.last_activity || s.finished_at || s.status_since;
+  const act = el("span", "act");
+  act.append(el("span", "go", go), more);
+  r.append(badge(s.where) || el("span"), el("span", "name", s.name), prs, subline(s, data), el("span", "when", ago(when)), act);
+  return r;
+}
+
+// --- the ⋯ menu -------------------------------------------------------------------
+
+const menu = document.getElementById("menu");
+let menuFor = null, menuOwner = null;
+
+function closeMenu() {
+  menu.hidden = true;
+  menuFor = null;
+  if (menuOwner) menuOwner.classList.remove("menu-on");
+  menuOwner = null;
+}
+
+function openMenu(s, owner, x, y) {
+  closeMenu();
+  menu.textContent = "";
+  const add = (label, fn, cls) => {
+    const b = el("button", cls || "", label);
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.addEventListener("click", e => { e.stopPropagation(); closeMenu(); fn(); });
+    menu.append(b);
+  };
+  add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
+  add("Rename…", () => askRename(s));
+  if (s.resume) add("Copy resume command", () => copyText(s.resume));
+  if (s.where && s.where.kind === "tmux") {
+    menu.append(el("hr"));
+    add("Stop…", () => askStop(s), "bad");
   }
-  document.getElementById("summary").textContent = (parts.join(" · ") || "Nothing running") + " · updated " + ago(data.updated);
+  menuFor = s.id;
+  menuOwner = owner;
+  owner.classList.add("menu-on");
+  menu.hidden = false;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + "px";
+  menu.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + "px";
+  menu.querySelector("button").focus({ preventScroll: true });
+}
+
+menu.addEventListener("keydown", e => {
+  const items = [...menu.querySelectorAll("button")];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  if (e.key === "Tab") closeMenu();
+});
+document.addEventListener("click", e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); });
+addEventListener("resize", closeMenu);
+addEventListener("scroll", closeMenu, true);
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("Copied: " + text); }
+  catch (e) { toast(text); }
+}
+
+// --- the Rename and Stop dialogs ----------------------------------------------------
+
+const dlg = document.getElementById("dlg");
+const dlgInput = document.getElementById("dlginput");
+const dlgOk = document.getElementById("dlgok");
+const dlgExtra = document.getElementById("dlgextra");
+let dlgAction = null, dlgExtraAction = null;
+
+function ask({ title, what, text, input, ok, danger, extra, onOk, onExtra }) {
+  closeMenu();
+  document.getElementById("dlgtitle").textContent = title;
+  document.getElementById("dlgwhat").textContent = what || "";
+  document.getElementById("dlgwhat").hidden = !what;
+  document.getElementById("dlgtext").textContent = text || "";
+  document.getElementById("dlgtext").hidden = !text;
+  dlgInput.hidden = input === undefined;
+  dlgInput.value = input || "";
+  dlgOk.textContent = ok;
+  dlgOk.className = danger ? "danger" : "primary";
+  dlgExtra.hidden = !extra;
+  dlgExtra.textContent = extra || "";
+  dlgAction = onOk;
+  dlgExtraAction = onExtra || null;
+  dlg.showModal();
+  if (!dlgInput.hidden) { dlgInput.focus(); dlgInput.select(); } else document.getElementById("dlgcancel").focus();
+}
+
+function finish(fn) { dlg.close(); if (fn) fn(); }
+dlgOk.addEventListener("click", () => finish(dlgAction));
+dlgExtra.addEventListener("click", () => finish(dlgExtraAction));
+document.getElementById("dlgcancel").addEventListener("click", () => dlg.close());
+dlgInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); finish(dlgAction); } });
+// A click on the backdrop, outside the dialog's box, cancels.
+dlg.addEventListener("click", e => {
+  const r = dlg.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+});
+
+function askRename(s) {
+  const own = s.claude_name && s.name !== s.claude_name;
+  ask({
+    title: "Rename",
+    text: "The name on the board" + (isRunning(s) && s.where.kind === "tmux" ? " and on its tmux tab" : "") + "." +
+      (own ? " Claude calls it “" + s.claude_name + "”." : ""),
+    input: s.name,
+    ok: "Save",
+    extra: own ? "Use Claude's name" : "",
+    onOk: () => {
+      const name = dlgInput.value.trim();
+      if (name && name !== s.name) post("/api/rename", { id: s.id, name });
+    },
+    onExtra: () => post("/api/rename", { id: s.id, name: "" }),
+  });
+}
+
+function askStop(s) {
+  const w = s.where || {};
+  ask({
+    title: "Stop window " + (w.session === "claude" ? w.index : w.session + ":" + w.index) + "?",
+    what: s.name,
+    text: (STOP_WARN[s.group] ? STOP_WARN[s.group] + " " : "") + "You can bring it back from Recently closed.",
+    ok: "Stop it",
+    danger: true,
+    onOk: () => post("/api/stop", { id: s.id }),
+  });
+}
+
+// --- drawing ------------------------------------------------------------------------
+
+function matches(s, q) {
+  if (!q) return true;
+  const w = s.where || {};
+  const hay = [s.name, s.claude_name, s.branch, shortPath(s.cwd), w.index, w.window_name, s.id,
+    ...(s.prs || []).map(p => "#" + p.number + " " + p.number)].filter(Boolean).join(" ").toLowerCase();
+  return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
+}
+
+function countGroups(list) {
+  const counts = {};
+  list.forEach(s => { counts[s.group] = (counts[s.group] || 0) + 1; });
+  return counts;
+}
+
+function drawHeader(data, all, here) {
+  const counts = countGroups(here);
+  const attn = document.getElementById("attn");
+  attn.textContent = "";
+  PILLS.forEach(([g, text]) => {
+    const n = counts[g];
+    if (!n) return;
+    if (g === "stopped" && n > 1) {
+      const b = el("button", "pill stopped", text(n) + " · Resume all");
+      b.type = "button";
+      b.title = "Resume every stopped session in tmux, in their old tab order";
+      b.addEventListener("click", () => post("/api/restore", {}));
+      attn.append(b);
+    } else {
+      attn.append(el("span", "pill " + g, text(n)));
+    }
+  });
+
+  // Each tab: how many sessions are open there, and a dot when one needs you or is done.
+  document.querySelectorAll(".tab").forEach(t => {
+    const space = t.dataset.space;
+    const mine = all.filter(s => spaceOf(s) === space);
+    const c = countGroups(mine);
+    t.setAttribute("aria-selected", String(space === tab));
+    t.querySelector(".tcount").textContent = String(mine.filter(s => s.group !== "recent").length);
+    const dot = t.querySelector(".tdot");
+    const urgent = c.needs_you ? "needs_you" : c.done ? "done" : "";
+    dot.hidden = !urgent;
+    dot.className = "tdot " + urgent;
+    t.title = urgent ? (c.needs_you ? c.needs_you + " need you" : c.done + " done, not looked at") : "";
+  });
+
+  const usage = document.getElementById("usage");
+  usage.textContent = "";
+  const u = data.usage;
+  [["5-hour", u && u.session], ["Week", u && u.weekly]].forEach(([label, m]) => {
+    if (!u || !u.available || !m) return;
+    const pct = Math.max(0, Math.min(100, Number(m.percent) || 0));
+    const box = el("span", "meter" + (pct >= 90 ? " hot" : pct >= 70 ? " warm" : ""));
+    box.title = label + " limit: " + pct + "% used" + (m.resets_text ? ", resets " + m.resets_text : "");
+    const bar = el("span", "mbar"), fill = el("i");
+    fill.style.width = pct + "%";
+    bar.append(fill);
+    box.append(el("span", "", label), bar, el("span", "", pct + "%"));
+    usage.append(box);
+  });
+  usage.hidden = !usage.childElementCount;
+
+  // The browser tab counts every session, whichever tab of the board is showing.
+  const total = countGroups(all);
+  favicon(["needs_you", "done", "working", "stopped"].find(g => total[g]));
+  const attention = (total.needs_you || 0) + (total.done || 0);
+  document.title = (attention ? "(" + attention + ") " : "") + "Claude sessions";
+}
+
+function setTab(space) {
+  if (!SPACES[space] || space === tab) return;
+  tab = space;
+  try { localStorage.setItem("boardTab", tab); } catch (e) {}
   const folder = document.getElementById("newfolder");
-  if (!folder.value && !folder.dataset.touched && data.default_folder) folder.value = data.default_folder;
+  if (!folder.dataset.touched) folder.value = folderOf(tab, lastData);
+  if (lastData) draw(lastData);
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setTab(t.dataset.space)));
+
+function draw(data) {
+  lastData = data;
+  closeMenu();
+  const all = data.sessions || [];
+  const here = all.filter(s => spaceOf(s) === tab);
+  drawHeader(data, all, here);
+  setLive(true, "Live · updated " + ago(data.updated));
+  const folder = document.getElementById("newfolder");
+  if (!folder.value && !folder.dataset.touched) folder.value = folderOf(tab, data);
   appRunning = !!data.app_running;
   showAlerts();
-  const attention = (counts.needs_you || 0) + (counts.done || 0);
-  document.title = (attention ? "(" + attention + ") " : "") + "Claude sessions";
 
   const warn = document.getElementById("warn");
   const w = [];
@@ -259,36 +703,56 @@ function draw(data) {
   warn.hidden = !w.length;
   warn.textContent = w.join(" ");
 
+  const q = document.getElementById("filter").value.trim();
+  const sessions = here.filter(s => matches(s, q));
   const root = document.getElementById("groups");
   const recentEl = root.querySelector("details");
-  if (recentEl) recentOpen = recentEl.open;
+  if (recentEl && !q) recentOpen = recentEl.open;
   root.textContent = "";
-  GROUPS.forEach(([g, label, note]) => {
-    const rows = sessions.filter(s => s.group === g);
-    if (!rows.length) return;
-    const h = el("h2");
-    h.append(el("span", "", label), el("span", "count", String(rows.length)));
+  const cards = CARD_GROUPS.flatMap(g => sessions.filter(s => s.group === g));
+  if (cards.length) {
     const grid = el("div", "grid");
-    rows.forEach(s => grid.append(card(s)));
-    if (g === "stopped" && rows.length > 1) {
-      const all = el("button", "ghost", "Resume all in tmux");
-      all.addEventListener("click", () => post("/api/restore", {}));
-      h.append(all);
-    }
+    cards.forEach(s => grid.append(card(s, data)));
+    root.append(grid);
+  } else if (here.length && !q) {
+    root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
+  }
+  ROW_GROUPS.forEach(([g, label, note]) => {
+    const list = sessions.filter(s => s.group === g);
+    if (!list.length) return;
+    const h = el("h2");
+    h.append(el("span", "", label), el("span", "count", String(list.length)));
+    const box = el("div", "rows");
+    list.forEach(s => box.append(row(s, data)));
     if (g === "recent") {
       const d = el("details");
-      d.open = recentOpen;
+      d.open = recentOpen || !!q;
       const sum = el("summary");
       sum.append(h);
-      d.append(sum, el("p", "note", note), grid);
+      d.append(sum, el("p", "note", note), box);
       root.append(d);
     } else {
       root.append(h);
       if (note) root.append(el("p", "note", note));
-      root.append(grid);
+      root.append(box);
     }
   });
-  if (!sessions.length) root.append(el("p", "empty", "No sessions yet. Start one above."));
+  if (!here.length && !q) {
+    const where = folderOf(tab, data);
+    root.append(el("p", "calm", "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
+      (where ? " in " + where : "") + "."));
+  } else if (q && !sessions.length) {
+    const other = Object.keys(SPACES).find(sp => sp !== tab);
+    const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length;
+    const p = el("p", "calm", "No session here matches “" + q + "”.");
+    if (there) {
+      const b = el("button", "ghost", there + " in " + SPACES[other] + " →");
+      b.type = "button";
+      b.addEventListener("click", () => setTab(other));
+      p.append(b);
+    }
+    root.append(p);
+  }
 }
 
 // "needs you" is two quick high notes; "done" is one lower note.
@@ -342,27 +806,30 @@ async function load() {
       return showConnect("The board's key has changed.");
     }
     const data = await r.json();
-    document.getElementById("newform").hidden = false;
-    document.getElementById("alerts").hidden = false;
-    // Redraw only on a change (or every 30s for the "5m ago" times), so a
-    // click never lands on a card that was just replaced.
+    CONTROLS.forEach(id => { if (id !== "usage") document.getElementById(id).hidden = false; });
+    // Redraw only on a change (or every 30s for the "5m ago" times), and never under an open
+    // menu or dialog, so a click never lands on a card that was just replaced.
     alertChanges(data.sessions || []);
-    const key = JSON.stringify([data.sessions, data.live_ok, data.error, [...fresh]]);
-    if (key !== lastKey || Date.now() - lastDraw > 30000) {
+    const key = JSON.stringify([data.sessions, data.live_ok, data.error, data.usage, [...fresh]]);
+    const busy = !menu.hidden || dlg.open;
+    if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
       lastKey = key; lastDraw = Date.now();
     } else {
-      document.getElementById("summary").textContent =
-        document.getElementById("summary").textContent.replace(/updated .*$/, "updated " + ago(data.updated));
+      if (!busy) lastData = data;
+      setLive(true, "Live · updated " + ago(data.updated));
     }
   } catch (e) {
-    document.getElementById("summary").textContent = UNREACHABLE;
+    setLive(false, "Offline");
+    const warn = document.getElementById("warn");
+    warn.hidden = false;
+    warn.textContent = UNREACHABLE;
   }
 }
 
 const alertsBtn = document.getElementById("alerts");
 function showAlerts() {
-  alertsBtn.textContent = appRunning ? "Alerts: in the menu bar app" : "Alerts: " + (alertsOn ? "on" : "off");
+  alertsBtn.textContent = appRunning ? "Alerts: menu bar app" : "Alerts: " + (alertsOn ? "on" : "off");
 }
 alertsBtn.addEventListener("click", async () => {
   alertsOn = !alertsOn;
@@ -372,14 +839,61 @@ alertsBtn.addEventListener("click", async () => {
 });
 showAlerts();
 
+// New session
+const newform = document.getElementById("newform");
+function openNew() { newform.hidden = false; document.getElementById("newname").focus(); }
+function closeNew() { newform.hidden = true; }
+document.getElementById("newbtn").addEventListener("click", () => newform.hidden ? openNew() : closeNew());
+document.getElementById("newcancel").addEventListener("click", closeNew);
 document.getElementById("newfolder").addEventListener("input", e => { e.target.dataset.touched = "1"; });
-document.getElementById("newform").addEventListener("submit", e => {
+newform.addEventListener("submit", e => {
   e.preventDefault();
   post("/api/new", {
     name: document.getElementById("newname").value.trim(),
     folder: document.getElementById("newfolder").value.trim(),
     worktree: document.getElementById("newwt").checked,
   });
+  document.getElementById("newname").value = "";
+  closeNew();
+});
+
+// Filter
+const filter = document.getElementById("filter");
+filter.addEventListener("input", () => { if (lastData) draw(lastData); });
+
+// Keys: a window number opens that window (on either tab); / filters; n starts a new session; Esc clears.
+let digits = "", digitTimer = null;
+function windowIndexes() {
+  return ((lastData && lastData.sessions) || []).filter(s => s.where && s.where.kind === "tmux" && s.where.session === "claude")
+    .map(s => [String(s.where.index), s]);
+}
+function jump(n) {
+  const hit = windowIndexes().find(([i]) => i === n);
+  if (hit) post("/api/open", { id: hit[1].id });
+  else toast("No Claude session in window " + n);
+}
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !lastData || dlg.open) return;
+  if (e.key === "Escape" && !menu.hidden) { const o = menuOwner; closeMenu(); if (o) o.focus(); return; }
+  if (!menu.hidden) return;
+  const typing = e.target.matches && e.target.matches("input, textarea");
+  if (e.key === "Escape") {
+    if (e.target === filter && filter.value) { filter.value = ""; draw(lastData); }
+    else if (!newform.hidden) closeNew();
+    if (typing) e.target.blur();
+    return;
+  }
+  if (typing) return;
+  if (e.key === "/") { e.preventDefault(); filter.focus(); }
+  else if (e.key === "n") { e.preventDefault(); openNew(); }
+  else if (/^[0-9]$/.test(e.key)) {
+    digits += e.key;
+    clearTimeout(digitTimer);
+    // Open straight away unless a longer number could still follow (1 → 10, 11).
+    const longer = windowIndexes().some(([i]) => i.length > digits.length && i.startsWith(digits));
+    const fire = () => { const n = digits; digits = ""; jump(n); };
+    if (longer) digitTimer = setTimeout(fire, 600); else fire();
+  }
 });
 
 load();
