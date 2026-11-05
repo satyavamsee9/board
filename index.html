@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- This same file is the board's own page (served on 127.0.0.1:7801, key filled in below) and the
+     public copy on GitHub Pages, which holds no data: it reads the board on the Mac it's opened on.
+     The policy lets it talk to nothing but that board. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' http://127.0.0.1:7801; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="board-token" content="__TOKEN__">
+<title>Claude sessions</title>
+<style>
+:root {
+  --bg:#f6f6f3; --card:#fff; --ink:#1c1c1e; --muted:#6c6c72; --line:#e2e2dd; --hover:#f0f0ea;
+  --needs:#c2271c; --working:#1769d1; --waiting:#3f7d22; --stopped:#b56a00; --recent:#8a8a90; --accent:#1769d1; --fresh:#e06c00;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#151517; --card:#1f1f22; --ink:#ededf0; --muted:#9b9ba2; --line:#2f2f34; --hover:#28282c;
+    --needs:#ff6b60; --working:#5aa3ff; --waiting:#86cc63; --stopped:#f2a33a; --recent:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c; }
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { max-width:1100px; margin:0 auto; padding:18px 16px 48px; }
+header { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; }
+h1 { font-size:21px; margin:0; }
+.sub { color:var(--muted); font-size:13px; }
+.bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 4px; padding:10px 12px;
+  background:var(--card); border:1px solid var(--line); border-radius:10px; }
+.bar input[type=text] { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+.bar input.name { width:170px; } .bar input.folder { flex:1; min-width:220px; }
+button { font:inherit; cursor:pointer; }
+.primary { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; }
+.ghost { background:none; border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:4px 10px; }
+h2 { font-size:15px; margin:22px 0 8px; display:flex; align-items:center; gap:8px; }
+h2 .count { color:var(--muted); font-weight:400; }
+.note { color:var(--muted); font-size:13px; margin:-4px 0 8px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
+.card { text-align:left; width:100%; background:var(--card); color:var(--ink); border:1px solid var(--line);
+  border-left:4px solid var(--recent); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
+.card:hover { background:var(--hover); }
+.card.needs_you { border-left-color:var(--needs); } .card.working { border-left-color:var(--working); }
+.card.done { border-left-color:var(--waiting); } .card.idle { border-left-color:var(--recent); }
+.card.stopped { border-left-color:var(--stopped); }
+.card.fresh { box-shadow:0 0 0 2px var(--fresh); }
+.newtag { font-size:11px; font-weight:700; color:#fff; background:var(--fresh); border-radius:6px; padding:1px 6px; }
+.top { display:flex; align-items:center; gap:8px; }
+.dot { width:10px; height:10px; border-radius:50%; background:var(--recent); flex:none; }
+.needs_you .dot { background:var(--needs); animation:pulse 1.2s infinite; }
+.working .dot { background:var(--working); animation:pulse 1.6s infinite; }
+.done .dot { background:var(--waiting); animation:pulse 1.2s infinite; } .idle .dot { background:var(--recent); }
+.stopped .dot { background:var(--stopped); }
+@keyframes pulse { 50% { opacity:.35; } }
+.name { font-weight:600; overflow-wrap:anywhere; }
+.state { font-size:13px; font-weight:600; }
+.needs_you .state { color:var(--needs); } .working .state { color:var(--working); }
+.done .state { color:var(--waiting); } .idle .state { color:var(--muted); font-weight:400; } .stopped .state { color:var(--stopped); } .recent .state { color:var(--recent); }
+.meta { display:flex; flex-wrap:wrap; gap:2px 10px; color:var(--muted); font-size:12.5px; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; overflow-wrap:anywhere; }
+.action { margin-top:2px; font-size:12.5px; color:var(--accent); }
+a { color:var(--accent); }
+.empty { color:var(--muted); }
+.warn { color:var(--needs); font-size:13px; }
+#toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--ink); color:var(--bg);
+  padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; }
+#toast.show { opacity:.95; }
+details > summary { cursor:pointer; list-style:none; }
+details > summary::-webkit-details-marker { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Claude sessions</h1>
+    <span class="sub" id="summary">Loading…</span>
+    <span style="flex:1"></span>
+    <button class="ghost" id="alerts" title="Notify me when a session needs me or finishes">Alerts: off</button>
+  </header>
+
+  <form class="bar" id="newform" autocomplete="off">
+    <strong>New session</strong>
+    <input type="text" class="name" id="newname" placeholder="short name, e.g. fix-login" required>
+    <input type="text" class="folder" id="newfolder" value="" placeholder="folder" aria-label="Folder">
+    <label class="sub"><input type="checkbox" id="newwt"> own worktree</label>
+    <button class="primary" type="submit">Start in tmux</button>
+  </form>
+  <p class="warn" id="warn" hidden></p>
+  <div id="groups"></div>
+</main>
+<div id="toast" role="status"></div>
+
+<script>
+// Served by the board itself (http) or the public copy on GitHub Pages (https).
+const LOCAL = location.protocol === "http:";
+const API = LOCAL ? "" : "http://127.0.0.1:7801";
+let TOKEN = LOCAL ? document.querySelector('meta[name="board-token"]').content : "";
+if (!LOCAL) {
+  // `board dash` opens this page with #key=...; keep it in this browser only and take it off the address.
+  const m = location.hash.match(/key=([A-Za-z0-9_-]{24,})/);
+  if (m) {
+    TOKEN = m[1];
+    try { localStorage.setItem("boardKey", TOKEN); } catch (e) {}
+    history.replaceState(null, "", location.pathname + location.search);
+  } else {
+    try { TOKEN = localStorage.getItem("boardKey") || ""; } catch (e) {}
+  }
+}
+const UNREACHABLE = LOCAL ? "Board server not reachable. Run: board up"
+  : "Can't reach the board on this Mac. Start it with t u. If the browser asked about apps and services on this device, choose Allow.";
+const GROUPS = [
+  ["needs_you", "Needs you", "Asking a question or for permission, or the last turn failed."],
+  ["done", "Done, not looked at yet", "Finished its work since you last looked at it. Click to open it."],
+  ["working", "Working", ""],
+  ["idle", "Idle", "Finished, and you've seen it. Nothing to do until you want it again."],
+  ["stopped", "Stopped mid-work", "Not running and didn't exit cleanly (a restart, a crash, a closed terminal). Click to resume it in tmux."],
+  ["recent", "Recently closed", "Click to resume in tmux."],
+];
+const STATE_TEXT = { needs_you:"Needs you", failed:"Last turn failed", working:"Working", done:"Done, not looked at yet", idle:"Idle",
+  stopped:"Stopped mid-work", closed:"Closed", untracked:"Not running" };
+
+let prev = null;
+const fresh = new Set();  // sessions that made a sound and haven't been looked at since
+let lastKey = "", lastDraw = 0;
+let recentOpen = false;
+let alertsOn = false;
+let appRunning = false;
+try { alertsOn = localStorage.getItem("alerts") === "on"; } catch (e) {}
+
+function ago(epoch) {
+  if (!epoch) return "";
+  const s = Math.max(0, Date.now() / 1000 - epoch);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+// The public page without a working key: say how to connect, and show nothing else.
+function showConnect(why) {
+  document.getElementById("newform").hidden = true;
+  document.getElementById("alerts").hidden = true;
+  document.getElementById("summary").textContent = "";
+  document.title = "Claude sessions";
+  const root = document.getElementById("groups");
+  root.textContent = "";
+  const p = el("p", "empty");
+  p.append(document.createTextNode((why ? why + " " : "") +
+    "This page shows the Claude sessions on your own Mac, read straight from the board running there; this site stores none of them. " +
+    "To connect, open it from your Mac with "), el("span", "mono", "t b"),
+    document.createTextNode(", the menu bar app, or Ctrl-b b in tmux."));
+  root.append(p);
+}
+
+async function post(path, body) {
+  try {
+    const r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json", "X-Board-Token": TOKEN }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 403 && !LOCAL) {
+      try { localStorage.removeItem("boardKey"); } catch (e) {}
+      TOKEN = "";
+      showConnect("The board's key has changed.");
+      return;
+    }
+    if (r.status === 403 && j.error === "forbidden") {
+      // A page from before a board restart holds an old click key; a reload gets the new one.
+      let last = 0;
+      try { last = Number(sessionStorage.getItem("boardReloadAt") || 0); } catch (e) {}
+      if (Date.now() - last > 15000) {
+        try { sessionStorage.setItem("boardReloadAt", String(Date.now())); } catch (e) {}
+        toast("The board restarted. Reloading the page; then click again.");
+        setTimeout(() => location.reload(), 900);
+      } else {
+        toast("This page is out of date. Reload it to use the clicks.");
+      }
+      return;
+    }
+    toast(j.message || j.error || (r.ok ? "Done" : "Failed"));
+    setTimeout(load, 800);
+  } catch (e) {
+    toast(UNREACHABLE);
+  }
+}
+
+function card(s) {
+  const running = s.where && s.where.kind !== "none";
+  const b = el("button", "card " + s.group);
+  b.type = "button";
+  const top = el("div", "top");
+  top.append(el("span", "dot"), el("span", "name", s.name));
+  if (fresh.has(s.id)) { b.classList.add("fresh"); top.append(el("span", "newtag", "new")); }
+  b.append(top);
+  let state = STATE_TEXT[s.status] || s.status;
+  if (s.status_since && (s.group === "needs_you" || s.group === "stopped")) state += " · " + ago(s.status_since);
+  if (s.group === "done" && s.finished_at) state += " · finished " + ago(s.finished_at);
+  b.append(el("div", "state", state));
+  const meta = el("div", "meta");
+  if (s.where) meta.append(el("span", "", s.where.label));
+  if (s.last_activity) meta.append(el("span", "", "active " + ago(s.last_activity)));
+  if (s.branch) meta.append(el("span", "mono", s.branch));
+  meta.append(el("span", "mono", s.id.slice(0, 8)));
+  (s.prs || []).forEach(p => {
+    if (typeof p.url === "string" && p.url.startsWith("https://github.com/")) {
+      const a = el("a", "", "#" + p.number);
+      a.href = p.url; a.target = "_blank"; a.rel = "noopener";
+      a.addEventListener("click", e => e.stopPropagation());
+      meta.append(a);
+    }
+  });
+  b.append(meta);
+  b.append(el("div", "action", running ? "Click to open its terminal" : "Click to resume in tmux"));
+  b.addEventListener("click", () => post(running ? "/api/open" : "/api/resume", { id: s.id }));
+  return b;
+}
+
+function draw(data) {
+  const sessions = data.sessions || [];
+  const counts = {};
+  sessions.forEach(s => { counts[s.group] = (counts[s.group] || 0) + 1; });
+  const parts = [];
+  if (counts.needs_you) parts.push(counts.needs_you + " need you");
+  if (counts.done) parts.push(counts.done + " done, not looked at");
+  if (counts.working) parts.push(counts.working + " working");
+  if (counts.idle) parts.push(counts.idle + " idle");
+  if (counts.stopped) parts.push(counts.stopped + " stopped mid-work");
+  const u = data.usage;
+  if (u && u.available) {
+    if (u.session) parts.push("5-hour limit " + u.session.percent + "% used");
+    if (u.weekly) parts.push("weekly " + u.weekly.percent + "%");
+  }
+  document.getElementById("summary").textContent = (parts.join(" · ") || "Nothing running") + " · updated " + ago(data.updated);
+  const folder = document.getElementById("newfolder");
+  if (!folder.value && !folder.dataset.touched && data.default_folder) folder.value = data.default_folder;
+  appRunning = !!data.app_running;
+  showAlerts();
+  const attention = (counts.needs_you || 0) + (counts.done || 0);
+  document.title = (attention ? "(" + attention + ") " : "") + "Claude sessions";
+
+  const warn = document.getElementById("warn");
+  const w = [];
+  if (!data.live_ok) w.push("Couldn't read the list of running sessions.");
+  if (data.error) w.push("Last refresh failed: " + data.error);
+  warn.hidden = !w.length;
+  warn.textContent = w.join(" ");
+
+  const root = document.getElementById("groups");
+  const recentEl = root.querySelector("details");
+  if (recentEl) recentOpen = recentEl.open;
+  root.textContent = "";
+  GROUPS.forEach(([g, label, note]) => {
+    const rows = sessions.filter(s => s.group === g);
+    if (!rows.length) return;
+    const h = el("h2");
+    h.append(el("span", "", label), el("span", "count", String(rows.length)));
+    const grid = el("div", "grid");
+    rows.forEach(s => grid.append(card(s)));
+    if (g === "stopped" && rows.length > 1) {
+      const all = el("button", "ghost", "Resume all in tmux");
+      all.addEventListener("click", () => post("/api/restore", {}));
+      h.append(all);
+    }
+    if (g === "recent") {
+      const d = el("details");
+      d.open = recentOpen;
+      const sum = el("summary");
+      sum.append(h);
+      d.append(sum, el("p", "note", note), grid);
+      root.append(d);
+    } else {
+      root.append(h);
+      if (note) root.append(el("p", "note", note));
+      root.append(grid);
+    }
+  });
+  if (!sessions.length) root.append(el("p", "empty", "No sessions yet. Start one above."));
+}
+
+// "needs you" is two quick high notes; "done" is one lower note.
+function beep(kind) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const notes = kind === "needs" ? [[988, 0], [1319, 0.16]] : [[660, 0]];
+    notes.forEach(([freq, at]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = freq; g.gain.value = 0.08;
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.14);
+    });
+  } catch (e) {}
+}
+
+function alertChanges(sessions) {
+  // The menu bar app plays the sounds and shows banners when it's running.
+  const quiet = appRunning;
+  const now = {};
+  sessions.forEach(s => { now[s.id] = s.group; });
+  sessions.forEach(s => { if (s.group !== "needs_you" && s.group !== "done") fresh.delete(s.id); });
+  if (prev) {
+    sessions.forEach(s => {
+      const was = prev[s.id];
+      let kind = "", msg = "";
+      if (s.group === "needs_you" && was !== "needs_you") { kind = "needs"; msg = "Needs you: " + s.name; }
+      else if (s.group === "done" && was !== "done") { kind = "done"; msg = "Done: " + s.name; }
+      if (!kind || s.on_screen) return;
+      fresh.add(s.id);
+      if (!alertsOn || quiet) return;
+      beep(kind);
+      try {
+        if (Notification.permission === "granted") {
+          const n = new Notification(msg, { body: "Click to open it." });
+          n.onclick = () => { window.focus(); post("/api/open", { id: s.id }); n.close(); };
+        }
+      } catch (e) {}
+    });
+  }
+  prev = now;
+}
+
+async function load() {
+  if (!LOCAL && !TOKEN) return showConnect("");
+  try {
+    const r = await fetch(API + "/api/sessions", { cache: "no-store", headers: TOKEN ? { "X-Board-Token": TOKEN } : {} });
+    if (r.status === 403 && !LOCAL) {
+      try { localStorage.removeItem("boardKey"); } catch (e) {}
+      TOKEN = "";
+      return showConnect("The board's key has changed.");
+    }
+    const data = await r.json();
+    document.getElementById("newform").hidden = false;
+    document.getElementById("alerts").hidden = false;
+    // Redraw only on a change (or every 30s for the "5m ago" times), so a
+    // click never lands on a card that was just replaced.
+    alertChanges(data.sessions || []);
+    const key = JSON.stringify([data.sessions, data.live_ok, data.error, [...fresh]]);
+    if (key !== lastKey || Date.now() - lastDraw > 30000) {
+      draw(data);
+      lastKey = key; lastDraw = Date.now();
+    } else {
+      document.getElementById("summary").textContent =
+        document.getElementById("summary").textContent.replace(/updated .*$/, "updated " + ago(data.updated));
+    }
+  } catch (e) {
+    document.getElementById("summary").textContent = UNREACHABLE;
+  }
+}
+
+const alertsBtn = document.getElementById("alerts");
+function showAlerts() {
+  alertsBtn.textContent = appRunning ? "Alerts: in the menu bar app" : "Alerts: " + (alertsOn ? "on" : "off");
+}
+alertsBtn.addEventListener("click", async () => {
+  alertsOn = !alertsOn;
+  if (alertsOn) { try { await Notification.requestPermission(); } catch (e) {} beep("done"); }
+  try { localStorage.setItem("alerts", alertsOn ? "on" : "off"); } catch (e) {}
+  showAlerts();
+});
+showAlerts();
+
+document.getElementById("newfolder").addEventListener("input", e => { e.target.dataset.touched = "1"; });
+document.getElementById("newform").addEventListener("submit", e => {
+  e.preventDefault();
+  post("/api/new", {
+    name: document.getElementById("newname").value.trim(),
+    folder: document.getElementById("newfolder").value.trim(),
+    worktree: document.getElementById("newwt").checked,
+  });
+});
+
+load();
+setInterval(load, 2000);
+</script>
+</body>
+</html>
