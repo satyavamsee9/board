@@ -261,6 +261,9 @@ const STOP_WARN = {
   done: "Claude finished in it, and you haven't looked at it yet.",
 };
 const SPACES = { work: "Work", personal: "Personal" };
+// Each tab's tmux session (the board server says; these are its names).
+const tmuxOf = space => ((lastData && lastData.tmux_sessions) || { work: "claude", personal: "personal" })[space];
+const boardSession = name => name === tmuxOf("work") || name === tmuxOf("personal");
 const FAVICON = { needs_you:"#d93025", done:"#2e7d32", working:"#1769d1", stopped:"#b26500" };
 const CONTROLS = ["usage", "tabs", "tools", "keys"];
 
@@ -368,10 +371,12 @@ async function post(path, body) {
   }
 }
 
-// Where the session runs, as a short badge: the tmux window number you'd type after `t`.
+// Where the session runs, as a short badge: the tmux window number you'd type after `t` in
+// that tab (work and personal each count their own windows).
+const winLabel = w => (boardSession(w.session) ? w.index : w.session + ":" + w.index);
 function badge(w) {
   if (!w || w.kind === "none") return null;
-  if (w.kind === "tmux") return el("span", "num", w.session === "claude" ? w.index : w.session + ":" + w.index);
+  if (w.kind === "tmux") return el("span", "num", winLabel(w));
   return el("span", "num text", w.kind === "iterm" ? "iTerm" : "bg");
 }
 
@@ -594,7 +599,7 @@ function askRename(s) {
 function askStop(s) {
   const w = s.where || {};
   ask({
-    title: "Stop window " + (w.session === "claude" ? w.index : w.session + ":" + w.index) + "?",
+    title: "Stop window " + winLabel(w) + "?",
     what: s.name,
     text: (STOP_WARN[s.group] ? STOP_WARN[s.group] + " " : "") + "You can bring it back from Recently closed.",
     ok: "Stop it",
@@ -740,7 +745,7 @@ function draw(data) {
   if (!here.length && !q) {
     const where = folderOf(tab, data);
     root.append(el("p", "calm", "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
-      (where ? " in " + where : "") + "."));
+      (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
   } else if (q && !sessions.length) {
     const other = Object.keys(SPACES).find(sp => sp !== tab);
     const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length;
@@ -861,16 +866,16 @@ newform.addEventListener("submit", e => {
 const filter = document.getElementById("filter");
 filter.addEventListener("input", () => { if (lastData) draw(lastData); });
 
-// Keys: a window number opens that window (on either tab); / filters; n starts a new session; Esc clears.
+// Keys: a window number opens that window of this tab's tmux; / filters; n starts a new session; Esc clears.
 let digits = "", digitTimer = null;
 function windowIndexes() {
-  return ((lastData && lastData.sessions) || []).filter(s => s.where && s.where.kind === "tmux" && s.where.session === "claude")
+  return ((lastData && lastData.sessions) || []).filter(s => s.where && s.where.kind === "tmux" && s.where.session === tmuxOf(tab))
     .map(s => [String(s.where.index), s]);
 }
 function jump(n) {
   const hit = windowIndexes().find(([i]) => i === n);
   if (hit) post("/api/open", { id: hit[1].id });
-  else toast("No Claude session in window " + n);
+  else toast("No Claude session in " + SPACES[tab].toLowerCase() + " window " + n);
 }
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || !lastData || dlg.open) return;
