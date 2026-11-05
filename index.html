@@ -158,7 +158,9 @@ dialog p { margin:0 0 10px; color:var(--muted); font-size:13.5px; }
 dialog p.what { color:var(--ink); font-weight:600; }
 dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg);
   color:var(--ink); margin:2px 0 12px; }
+.dlgcheck { display:flex; align-items:center; gap:7px; font-size:13.5px; margin:-4px 0 14px; cursor:pointer; }
 .dlgbtns { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+.from { color:var(--faint); }
 .dlgbtns .left { margin-right:auto; }
 
 .empty { color:var(--muted); }
@@ -209,6 +211,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
   <p class="what" id="dlgwhat"></p>
   <p id="dlgtext"></p>
   <input type="text" id="dlginput" maxlength="80" aria-label="Name" hidden>
+  <label class="dlgcheck" id="dlgcheckrow" hidden><input type="checkbox" id="dlgcheck"> <span id="dlgchecktext"></span></label>
   <div class="dlgbtns">
     <button class="ghost left" type="button" id="dlgextra" hidden></button>
     <button class="ghost" type="button" id="dlgcancel">Cancel</button>
@@ -432,7 +435,7 @@ function clickable(n, s) {
   n.addEventListener("contextmenu", e => { e.preventDefault(); openMenu(s, n, e.clientX, e.clientY); });
   const more = el("button", "more", "⋯");
   more.type = "button";
-  more.title = "More: rename, stop, copy the resume command";
+  more.title = "More: rename, fork, stop, copy the resume command";
   more.setAttribute("aria-label", "More actions for " + s.name);
   more.setAttribute("aria-haspopup", "menu");
   more.addEventListener("click", e => {
@@ -466,11 +469,20 @@ function card(s, data) {
   const meta = el("div", "meta");
   meta.append(...prLinks(s));
   if (s.last_activity) meta.append(el("span", "", "active " + ago(s.last_activity)));
+  if (s.forked_from) meta.append(fromTag(s));
   b.append(top, status, meta);
   const sub = subline(s, data);
   if (sub.textContent) b.append(sub);
   b.append(el("span", "go", go), more);
   return b;
+}
+
+// "↳ from <name>" on a fork made from the board.
+function fromTag(s) {
+  const f = s.forked_from || {};
+  const t = el("span", "from", "↳ from " + (f.name || "an older session"));
+  t.title = "Forked from " + (f.name || "a session no longer listed") + (f.id ? " (" + f.id.slice(0, 8) + ")" : "");
+  return t;
 }
 
 function row(s, data) {
@@ -482,7 +494,9 @@ function row(s, data) {
   const when = s.last_activity || s.finished_at || s.status_since;
   const act = el("span", "act");
   act.append(el("span", "go", go), more);
-  r.append(badge(s.where) || el("span"), el("span", "name", s.name), prs, subline(s, data), el("span", "when", ago(when)), act);
+  const nm = el("span", "name", (s.forked_from ? "↳ " : "") + s.name);
+  if (s.forked_from) nm.title = fromTag(s).title;
+  r.append(badge(s.where) || el("span"), nm, prs, subline(s, data), el("span", "when", ago(when)), act);
   return r;
 }
 
@@ -510,6 +524,7 @@ function openMenu(s, owner, x, y) {
   };
   add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
   add("Rename…", () => askRename(s));
+  add("Fork…", () => askFork(s));
   if (s.resume) add("Copy resume command", () => copyText(s.resume));
   if (s.where && s.where.kind === "tmux") {
     menu.append(el("hr"));
@@ -549,7 +564,7 @@ const dlgOk = document.getElementById("dlgok");
 const dlgExtra = document.getElementById("dlgextra");
 let dlgAction = null, dlgExtraAction = null;
 
-function ask({ title, what, text, input, ok, danger, extra, onOk, onExtra }) {
+function ask({ title, what, text, input, check, ok, danger, extra, onOk, onExtra }) {
   closeMenu();
   document.getElementById("dlgtitle").textContent = title;
   document.getElementById("dlgwhat").textContent = what || "";
@@ -558,6 +573,9 @@ function ask({ title, what, text, input, ok, danger, extra, onOk, onExtra }) {
   document.getElementById("dlgtext").hidden = !text;
   dlgInput.hidden = input === undefined;
   dlgInput.value = input || "";
+  document.getElementById("dlgcheckrow").hidden = !check;
+  document.getElementById("dlgchecktext").textContent = check || "";
+  document.getElementById("dlgcheck").checked = false;
   dlgOk.textContent = ok;
   dlgOk.className = danger ? "danger" : "primary";
   dlgExtra.hidden = !extra;
@@ -596,6 +614,26 @@ function askRename(s) {
   });
 }
 
+// The default name for a fork, as the board server makes it: the session's name, short, plus -fork.
+function forkName(text) {
+  const base = (text || "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).slice(0, 19)
+    .replace(/^[-._]+|[-._]+$/g, "");
+  return (base || "claude") + "-fork";
+}
+
+function askFork(s) {
+  ask({
+    title: "Fork",
+    what: s.name,
+    text: "A new session that starts with a copy of this conversation so far, in a new tmux window next to it. " +
+      "This one keeps going as it is. Name for the new one:",
+    input: forkName(s.name),
+    check: "In its own git worktree (its own copy of the code, so the two don't edit the same files)",
+    ok: "Fork",
+    onOk: () => post("/api/fork", { id: s.id, name: dlgInput.value.trim(), worktree: document.getElementById("dlgcheck").checked }),
+  });
+}
+
 function askStop(s) {
   const w = s.where || {};
   ask({
@@ -613,7 +651,7 @@ function askStop(s) {
 function matches(s, q) {
   if (!q) return true;
   const w = s.where || {};
-  const hay = [s.name, s.claude_name, s.branch, shortPath(s.cwd), w.index, w.window_name, s.id,
+  const hay = [s.name, s.claude_name, (s.forked_from || {}).name, s.branch, shortPath(s.cwd), w.index, w.window_name, s.id,
     ...(s.prs || []).map(p => "#" + p.number + " " + p.number)].filter(Boolean).join(" ").toLowerCase();
   return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
 }
