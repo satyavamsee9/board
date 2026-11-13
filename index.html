@@ -136,13 +136,14 @@ details[open] > summary h2::before { content:"▾"; }
 .row .prs { display:flex; gap:4px; }
 .row .when { color:var(--muted); font-size:12.5px; text-align:right; white-space:nowrap; }
 .row .act { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
-/* The other tmux windows (shells, a port-forward...): window, name, what it runs, folder, last output. */
-.row.win { grid-template-columns:34px minmax(0,1fr) minmax(0,1.6fr) minmax(0,160px) 64px 96px; --c:var(--idle); }
+/* Other terminals (tmux windows, iTerm tabs): window, name, what it runs, folder, last output. */
+.row.win { grid-template-columns:52px minmax(0,1fr) minmax(0,1.6fr) minmax(0,160px) 64px 96px; --c:var(--idle); }
+.row.win .num { white-space:nowrap; }
 .cmd { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .cmd.idle { color:var(--faint); font:italic 12.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 @media (max-width:760px) {
   .row { grid-template-columns:34px minmax(0,1fr) auto 56px 30px; }
-  .row.win { grid-template-columns:34px minmax(0,1fr) minmax(0,1.4fr) 56px 30px; }
+  .row.win { grid-template-columns:52px minmax(0,1fr) minmax(0,1.4fr) 56px 30px; }
   .row .sub, .row .go { display:none; }
   .row .prs a:nth-child(n+2) { display:none; }
   .usage { order:5; width:100%; }
@@ -380,8 +381,9 @@ async function post(path, body) {
 }
 
 // Where the session runs, as a short badge: the tmux window number you'd type after `t` in
-// that tab (work and personal each count their own windows).
-const winLabel = w => (boardSession(w.session) ? w.index : w.session + ":" + w.index);
+// that tab (work and personal each count their own windows); "misc 3" in the misc tab.
+const miscSession = () => ((lastData && lastData.tmux_sessions) || {}).misc || "misc";
+const winLabel = w => (boardSession(w.session) ? w.index : w.session === miscSession() ? "misc " + w.index : w.session + ":" + w.index);
 function badge(w) {
   if (!w || w.kind === "none") return null;
   if (w.kind === "tmux") return el("span", "num", winLabel(w));
@@ -505,43 +507,54 @@ function row(s, data) {
   return r;
 }
 
-// --- the other tmux windows: shells and whatever runs in them, like a port-forward ----
-
-function winText(w) {
-  if (w.running) return w.command;
-  return w.home ? "home: the session list and your shell" : "shell, nothing running";
-}
+// --- other terminals: tmux windows and plain iTerm tabs with no Claude session in them ---
 
 function goWindow(w) { post("/api/window", { window: w.window }); }
+function goTab(t) { post("/api/tab", { tty: t.tty }); }
 
-function winRow(w, data) {
+// One row: badge, name, what it runs (or that it's idle), folder if not the usual one, last output.
+function otherRow(x, badgeEl, idleText, title, go, data) {
   const r = el("div", "row win");
-  r.dataset.window = w.window;
   r.tabIndex = 0;
   r.setAttribute("role", "button");
-  r.title = "Go to window " + winLabel(w);
-  r.addEventListener("click", () => goWindow(w));
+  r.title = title;
+  r.addEventListener("click", go);
   r.addEventListener("keydown", e => {
-    if (e.target === r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); goWindow(w); }
+    if (e.target === r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); go(); }
   });
-  const cmd = el("span", "cmd" + (w.running ? "" : " idle"), winText(w));
-  if (w.running) cmd.title = w.command;
-  const folder = shortPath(w.cwd);
-  const sub = el("span", "sub", folder === folderOf(w.space, data) ? "" : folder);
-  sub.title = w.cwd || "";
-  const when = el("span", "when", ago(w.activity));
+  const cmd = el("span", "cmd" + (x.running ? "" : " idle"), x.running ? x.command : idleText);
+  if (x.running) cmd.title = x.command;
+  const folder = shortPath(x.cwd);
+  const sub = el("span", "sub", folder === folderOf(x.space, data) ? "" : folder);
+  sub.title = x.cwd || "";
+  const when = el("span", "when", ago(x.activity));
   when.title = "Last output in it";
   const act = el("span", "act");
   act.append(el("span", "go", "Go ↗"));
-  r.append(el("span", "num", winLabel(w)), el("span", "name", w.name), cmd, sub, when, act);
+  r.append(badgeEl, el("span", "name", x.name), cmd, sub, when, act);
   return r;
 }
 
-function matchesWin(w, q) {
+function winRow(w, data) {
+  const r = otherRow(w, el("span", w.session === miscSession() ? "num text" : "num", winLabel(w)), w.home ? "home: the session list and your shell" : "shell, nothing running",
+    "Go to window " + winLabel(w), () => goWindow(w), data);
+  r.dataset.window = w.window;
+  return r;
+}
+
+function itermRow(t, data) {
+  const r = otherRow(t, el("span", "num text", "iTerm"), "shell, nothing running", "Bring this iTerm tab forward", () => goTab(t), data);
+  r.dataset.tty = t.tty;
+  return r;
+}
+
+function matchesOther(parts, q) {
   if (!q) return true;
-  const hay = [w.name, w.command, shortPath(w.cwd), w.index, w.home ? "home" : "shell"].filter(Boolean).join(" ").toLowerCase();
+  const hay = parts.filter(Boolean).join(" ").toLowerCase();
   return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
 }
+const matchesWin = (w, q) => matchesOther([w.name, w.command, shortPath(w.cwd), w.index, w.home ? "home" : "shell"], q);
+const matchesTab = (t, q) => matchesOther([t.name, t.command, shortPath(t.cwd), "iterm", t.running ? "" : "shell"], q);
 
 // --- the ⋯ menu -------------------------------------------------------------------
 
@@ -804,14 +817,17 @@ function draw(data) {
     root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
   }
   const wins = (data.windows || []).filter(w => w.space === tab && matchesWin(w, q));
+  const iterms = (data.tabs || []).filter(t => t.space === tab && matchesTab(t, q));
   ROW_GROUPS.forEach(([g, label, note]) => {
-    // The other tmux windows go between Idle and Recently closed.
-    if (g === "recent" && wins.length) {
+    // The other terminals go between Idle and Recently closed: tmux windows, then iTerm tabs.
+    if (g === "recent" && wins.length + iterms.length) {
       const h = el("h2");
-      h.append(el("span", "", "Other tmux windows"), el("span", "count", String(wins.length)));
+      h.append(el("span", "", "Other terminals"), el("span", "count", String(wins.length + iterms.length)));
       const box = el("div", "rows");
       wins.forEach(w => box.append(winRow(w, data)));
-      root.append(h, el("p", "note", "Shells and anything else running in this tab's tmux, like a port-forward. Click one to go there."), box);
+      iterms.forEach(t => box.append(itermRow(t, data)));
+      root.append(h, el("p", "note", "Shells and anything else running in this tab's tmux, the misc tab or a plain iTerm tab, " +
+        "like a port-forward. Click one to go there."), box);
     }
     const list = sessions.filter(s => s.group === g);
     if (!list.length) return;
@@ -836,10 +852,11 @@ function draw(data) {
     const where = folderOf(tab, data);
     root.append(el("p", "calm", "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
       (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
-  } else if (q && !sessions.length && !wins.length) {
+  } else if (q && !sessions.length && !wins.length && !iterms.length) {
     const other = Object.keys(SPACES).find(sp => sp !== tab);
     const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length +
-      (data.windows || []).filter(w => w.space === other && matchesWin(w, q)).length;
+      (data.windows || []).filter(w => w.space === other && matchesWin(w, q)).length +
+      (data.tabs || []).filter(t => t.space === other && matchesTab(t, q)).length;
     const p = el("p", "calm", "No session or window here matches “" + q + "”.");
     if (there) {
       const b = el("button", "ghost", there + " in " + SPACES[other] + " →");
@@ -906,9 +923,10 @@ async function load() {
     // Redraw only on a change (or every 30s for the "5m ago" times), and never under an open
     // menu or dialog, so a click never lands on a card that was just replaced.
     alertChanges(data.sessions || []);
-    // A window's last-output time changes all the time; the 30s redraw keeps it fresh enough.
+    // A terminal's last-output time changes all the time; the 30s redraw keeps it fresh enough.
     const wins = (data.windows || []).map(w => [w.window, w.index, w.name, w.command, w.cwd]);
-    const key = JSON.stringify([data.sessions, wins, data.live_ok, data.error, data.usage, [...fresh]]);
+    const iterms = (data.tabs || []).map(t => [t.tty, t.name, t.command, t.cwd]);
+    const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, [...fresh]]);
     const busy = !menu.hidden || dlg.open;
     if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
