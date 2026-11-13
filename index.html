@@ -136,8 +136,13 @@ details[open] > summary h2::before { content:"▾"; }
 .row .prs { display:flex; gap:4px; }
 .row .when { color:var(--muted); font-size:12.5px; text-align:right; white-space:nowrap; }
 .row .act { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
+/* The other tmux windows (shells, a port-forward...): window, name, what it runs, folder, last output. */
+.row.win { grid-template-columns:34px minmax(0,1fr) minmax(0,1.6fr) minmax(0,160px) 64px 96px; --c:var(--idle); }
+.cmd { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.cmd.idle { color:var(--faint); font:italic 12.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 @media (max-width:760px) {
   .row { grid-template-columns:34px minmax(0,1fr) auto 56px 30px; }
+  .row.win { grid-template-columns:34px minmax(0,1fr) minmax(0,1.4fr) 56px 30px; }
   .row .sub, .row .go { display:none; }
   .row .prs a:nth-child(n+2) { display:none; }
   .usage { order:5; width:100%; }
@@ -187,7 +192,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
   </nav>
 
   <div class="tools" id="tools" hidden>
-    <input type="search" id="filter" placeholder="Filter by name, branch, PR or window ( / )" aria-label="Filter sessions">
+    <input type="search" id="filter" placeholder="Filter by name, branch, PR, window or command ( / )" aria-label="Filter sessions and windows">
     <span class="grow"></span>
     <button class="ghost" id="alerts" type="button" title="Notify me when a session needs me or finishes">Alerts: off</button>
     <button class="primary" id="newbtn" type="button" title="Start a new Claude session in tmux (n)">+ New session</button>
@@ -500,6 +505,44 @@ function row(s, data) {
   return r;
 }
 
+// --- the other tmux windows: shells and whatever runs in them, like a port-forward ----
+
+function winText(w) {
+  if (w.running) return w.command;
+  return w.home ? "home: the session list and your shell" : "shell, nothing running";
+}
+
+function goWindow(w) { post("/api/window", { window: w.window }); }
+
+function winRow(w, data) {
+  const r = el("div", "row win");
+  r.dataset.window = w.window;
+  r.tabIndex = 0;
+  r.setAttribute("role", "button");
+  r.title = "Go to window " + winLabel(w);
+  r.addEventListener("click", () => goWindow(w));
+  r.addEventListener("keydown", e => {
+    if (e.target === r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); goWindow(w); }
+  });
+  const cmd = el("span", "cmd" + (w.running ? "" : " idle"), winText(w));
+  if (w.running) cmd.title = w.command;
+  const folder = shortPath(w.cwd);
+  const sub = el("span", "sub", folder === folderOf(w.space, data) ? "" : folder);
+  sub.title = w.cwd || "";
+  const when = el("span", "when", ago(w.activity));
+  when.title = "Last output in it";
+  const act = el("span", "act");
+  act.append(el("span", "go", "Go ↗"));
+  r.append(el("span", "num", winLabel(w)), el("span", "name", w.name), cmd, sub, when, act);
+  return r;
+}
+
+function matchesWin(w, q) {
+  if (!q) return true;
+  const hay = [w.name, w.command, shortPath(w.cwd), w.index, w.home ? "home" : "shell"].filter(Boolean).join(" ").toLowerCase();
+  return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
+}
+
 // --- the ⋯ menu -------------------------------------------------------------------
 
 const menu = document.getElementById("menu");
@@ -760,7 +803,16 @@ function draw(data) {
   } else if (here.length && !q) {
     root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
   }
+  const wins = (data.windows || []).filter(w => w.space === tab && matchesWin(w, q));
   ROW_GROUPS.forEach(([g, label, note]) => {
+    // The other tmux windows go between Idle and Recently closed.
+    if (g === "recent" && wins.length) {
+      const h = el("h2");
+      h.append(el("span", "", "Other tmux windows"), el("span", "count", String(wins.length)));
+      const box = el("div", "rows");
+      wins.forEach(w => box.append(winRow(w, data)));
+      root.append(h, el("p", "note", "Shells and anything else running in this tab's tmux, like a port-forward. Click one to go there."), box);
+    }
     const list = sessions.filter(s => s.group === g);
     if (!list.length) return;
     const h = el("h2");
@@ -784,10 +836,11 @@ function draw(data) {
     const where = folderOf(tab, data);
     root.append(el("p", "calm", "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
       (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
-  } else if (q && !sessions.length) {
+  } else if (q && !sessions.length && !wins.length) {
     const other = Object.keys(SPACES).find(sp => sp !== tab);
-    const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length;
-    const p = el("p", "calm", "No session here matches “" + q + "”.");
+    const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length +
+      (data.windows || []).filter(w => w.space === other && matchesWin(w, q)).length;
+    const p = el("p", "calm", "No session or window here matches “" + q + "”.");
     if (there) {
       const b = el("button", "ghost", there + " in " + SPACES[other] + " →");
       b.type = "button";
@@ -853,7 +906,9 @@ async function load() {
     // Redraw only on a change (or every 30s for the "5m ago" times), and never under an open
     // menu or dialog, so a click never lands on a card that was just replaced.
     alertChanges(data.sessions || []);
-    const key = JSON.stringify([data.sessions, data.live_ok, data.error, data.usage, [...fresh]]);
+    // A window's last-output time changes all the time; the 30s redraw keeps it fresh enough.
+    const wins = (data.windows || []).map(w => [w.window, w.index, w.name, w.command, w.cwd]);
+    const key = JSON.stringify([data.sessions, wins, data.live_ok, data.error, data.usage, [...fresh]]);
     const busy = !menu.hidden || dlg.open;
     if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
@@ -907,13 +962,16 @@ filter.addEventListener("input", () => { if (lastData) draw(lastData); });
 // Keys: a window number opens that window of this tab's tmux; / filters; n starts a new session; Esc clears.
 let digits = "", digitTimer = null;
 function windowIndexes() {
-  return ((lastData && lastData.sessions) || []).filter(s => s.where && s.where.kind === "tmux" && s.where.session === tmuxOf(tab))
-    .map(s => [String(s.where.index), s]);
+  const data = lastData || {};
+  const claude = (data.sessions || []).filter(s => s.where && s.where.kind === "tmux" && s.where.session === tmuxOf(tab))
+    .map(s => [String(s.where.index), () => post("/api/open", { id: s.id })]);
+  const other = (data.windows || []).filter(w => w.session === tmuxOf(tab)).map(w => [String(w.index), () => goWindow(w)]);
+  return claude.concat(other);
 }
 function jump(n) {
   const hit = windowIndexes().find(([i]) => i === n);
-  if (hit) post("/api/open", { id: hit[1].id });
-  else toast("No Claude session in " + SPACES[tab].toLowerCase() + " window " + n);
+  if (hit) hit[1]();
+  else toast("No window " + n + " in the " + SPACES[tab].toLowerCase() + " tab");
 }
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || !lastData || dlg.open) return;
