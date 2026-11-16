@@ -190,6 +190,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
   <nav class="tabs" id="tabs" role="tablist" hidden>
     <button class="tab" type="button" role="tab" data-space="work">Work <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="personal">Personal <span class="tcount"></span><span class="tdot" hidden></span></button>
+    <button class="tab" type="button" role="tab" data-space="misc">Misc <span class="tcount"></span><span class="tdot" hidden></span></button>
   </nav>
 
   <div class="tools" id="tools" hidden>
@@ -269,10 +270,13 @@ const STOP_WARN = {
   needs_you: "Claude is waiting for your answer in it.",
   done: "Claude finished in it, and you haven't looked at it yet.",
 };
-const SPACES = { work: "Work", personal: "Personal" };
+// The misc tab holds shells and commands only, never a Claude session.
+const SPACES = { work: "Work", personal: "Personal", misc: "Misc" };
 // Each tab's tmux session (the board server says; these are its names).
-const tmuxOf = space => ((lastData && lastData.tmux_sessions) || { work: "claude", personal: "personal" })[space];
-const boardSession = name => name === tmuxOf("work") || name === tmuxOf("personal");
+const tmuxOf = space => ({ work: "claude", personal: "personal", misc: "misc", ...((lastData && lastData.tmux_sessions) || {}) })[space];
+const boardSession = name => Object.keys(SPACES).some(sp => tmuxOf(sp) === name);
+// A tmux window's tab: the misc tab for its own windows; otherwise work or personal, as the server says.
+const winSpace = w => (w.session === tmuxOf("misc") ? "misc" : w.space);
 const FAVICON = { needs_you:"#d93025", done:"#2e7d32", working:"#1769d1", stopped:"#b26500" };
 const CONTROLS = ["usage", "tabs", "tools", "keys"];
 
@@ -381,9 +385,8 @@ async function post(path, body) {
 }
 
 // Where the session runs, as a short badge: the tmux window number you'd type after `t` in
-// that tab (work and personal each count their own windows); "misc 3" in the misc tab.
-const miscSession = () => ((lastData && lastData.tmux_sessions) || {}).misc || "misc";
-const winLabel = w => (boardSession(w.session) ? w.index : w.session === miscSession() ? "misc " + w.index : w.session + ":" + w.index);
+// that tab (work, personal and misc each count their own windows).
+const winLabel = w => (boardSession(w.session) ? w.index : w.session + ":" + w.index);
 function badge(w) {
   if (!w || w.kind === "none") return null;
   if (w.kind === "tmux") return el("span", "num", winLabel(w));
@@ -536,7 +539,7 @@ function otherRow(x, badgeEl, idleText, title, go, data) {
 }
 
 function winRow(w, data) {
-  const r = otherRow(w, el("span", w.session === miscSession() ? "num text" : "num", winLabel(w)), w.home ? "home: the session list and your shell" : "shell, nothing running",
+  const r = otherRow(w, el("span", "num", winLabel(w)), w.home ? "home: the session list and your shell" : "shell, nothing running",
     "Go to window " + winLabel(w), () => goWindow(w), data);
   r.dataset.window = w.window;
   return r;
@@ -736,13 +739,16 @@ function drawHeader(data, all, here) {
     }
   });
 
-  // Each tab: how many sessions are open there, and a dot when one needs you or is done.
+  // Each tab: how many sessions are open there (windows, in the misc tab), and a dot when one
+  // needs you or is done.
   document.querySelectorAll(".tab").forEach(t => {
     const space = t.dataset.space;
     const mine = all.filter(s => spaceOf(s) === space);
     const c = countGroups(mine);
     t.setAttribute("aria-selected", String(space === tab));
-    t.querySelector(".tcount").textContent = String(mine.filter(s => s.group !== "recent").length);
+    t.querySelector(".tcount").textContent = String(space === "misc"
+      ? (data.windows || []).filter(w => winSpace(w) === "misc").length
+      : mine.filter(s => s.group !== "recent").length);
     const dot = t.querySelector(".tdot");
     const urgent = c.needs_you ? "needs_you" : c.done ? "done" : "";
     dot.hidden = !urgent;
@@ -792,6 +798,9 @@ function draw(data) {
   setLive(true, "Live · updated " + ago(data.updated));
   const folder = document.getElementById("newfolder");
   if (!folder.value && !folder.dataset.touched) folder.value = folderOf(tab, data);
+  // Claude sessions never start in the misc tab.
+  document.getElementById("newbtn").hidden = tab === "misc";
+  if (tab === "misc") closeNew();
   appRunning = !!data.app_running;
   showAlerts();
 
@@ -816,18 +825,19 @@ function draw(data) {
   } else if (here.length && !q) {
     root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
   }
-  const wins = (data.windows || []).filter(w => w.space === tab && matchesWin(w, q));
+  const wins = (data.windows || []).filter(w => winSpace(w) === tab && matchesWin(w, q));
   const iterms = (data.tabs || []).filter(t => t.space === tab && matchesTab(t, q));
   ROW_GROUPS.forEach(([g, label, note]) => {
     // The other terminals go between Idle and Recently closed: tmux windows, then iTerm tabs.
     if (g === "recent" && wins.length + iterms.length) {
       const h = el("h2");
-      h.append(el("span", "", "Other terminals"), el("span", "count", String(wins.length + iterms.length)));
+      h.append(el("span", "", tab === "misc" ? "Shells and commands" : "Other terminals"), el("span", "count", String(wins.length + iterms.length)));
       const box = el("div", "rows");
       wins.forEach(w => box.append(winRow(w, data)));
       iterms.forEach(t => box.append(itermRow(t, data)));
-      root.append(h, el("p", "note", "Shells and anything else running in this tab's tmux, the misc tab or a plain iTerm tab, " +
-        "like a port-forward. Click one to go there."), box);
+      root.append(h, el("p", "note", tab === "misc"
+        ? "Every window in the misc tab. Click one to go there. In a terminal, t m NAME -- COMMAND opens another; t mv 3 moves window 3 here."
+        : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there."), box);
     }
     const list = sessions.filter(s => s.group === g);
     if (!list.length) return;
@@ -848,22 +858,26 @@ function draw(data) {
       root.append(box);
     }
   });
-  if (!here.length && !q) {
+  if (tab === "misc" ? !wins.length && !q : !here.length && !q) {
     const where = folderOf(tab, data);
-    root.append(el("p", "calm", "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
-      (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
+    root.append(el("p", "calm", tab === "misc"
+      ? "Nothing in the misc tab. In a terminal, t m NAME -- COMMAND opens a window there for a shell or a command like kc sync; " +
+        "t mv 3 moves window 3 of the tab you're in."
+      : "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
+        (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
   } else if (q && !sessions.length && !wins.length && !iterms.length) {
-    const other = Object.keys(SPACES).find(sp => sp !== tab);
-    const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length +
-      (data.windows || []).filter(w => w.space === other && matchesWin(w, q)).length +
-      (data.tabs || []).filter(t => t.space === other && matchesTab(t, q)).length;
+    // A button for each other tab where something matches.
     const p = el("p", "calm", "No session or window here matches “" + q + "”.");
-    if (there) {
+    Object.keys(SPACES).filter(sp => sp !== tab).forEach(other => {
+      const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length +
+        (data.windows || []).filter(w => winSpace(w) === other && matchesWin(w, q)).length +
+        (data.tabs || []).filter(t => t.space === other && matchesTab(t, q)).length;
+      if (!there) return;
       const b = el("button", "ghost", there + " in " + SPACES[other] + " →");
       b.type = "button";
       b.addEventListener("click", () => setTab(other));
       p.append(b);
-    }
+    });
     root.append(p);
   }
 }
@@ -924,7 +938,7 @@ async function load() {
     // menu or dialog, so a click never lands on a card that was just replaced.
     alertChanges(data.sessions || []);
     // A terminal's last-output time changes all the time; the 30s redraw keeps it fresh enough.
-    const wins = (data.windows || []).map(w => [w.window, w.index, w.name, w.command, w.cwd]);
+    const wins = (data.windows || []).map(w => [w.window, w.session, w.index, w.name, w.command, w.cwd]);
     const iterms = (data.tabs || []).map(t => [t.tty, t.name, t.command, t.cwd]);
     const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, [...fresh]]);
     const busy = !menu.hidden || dlg.open;
@@ -1004,7 +1018,11 @@ document.addEventListener("keydown", e => {
   }
   if (typing) return;
   if (e.key === "/") { e.preventDefault(); filter.focus(); }
-  else if (e.key === "n") { e.preventDefault(); openNew(); }
+  else if (e.key === "n") {
+    e.preventDefault();
+    if (tab === "misc") toast("Claude sessions don't go in the misc tab. For a shell there: t m NAME in a terminal");
+    else openNew();
+  }
   else if (/^[0-9]$/.test(e.key)) {
     digits += e.key;
     clearTimeout(digitTimer);
