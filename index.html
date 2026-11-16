@@ -68,12 +68,12 @@ button.pill:hover { background:color-mix(in srgb, var(--c) 25%, transparent); }
 .calm button { margin-left:6px; }
 .warn { color:var(--needs); font-size:13px; margin:10px 0 0; }
 
-/* New session, opened from its button. */
+/* New session (a new tmux window in the misc tab), opened from its button. */
 .panel { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0 0; padding:12px;
   background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
 .panel input[type=text] { font:inherit; padding:6px 9px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
 .panel input.nm { width:200px; } .panel input.folder { flex:1; min-width:220px; }
-.panel label { font-size:13px; color:var(--muted); }
+.panel label, .panel .hint { font-size:13px; color:var(--muted); }
 
 /* Groups */
 h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:24px 0 8px;
@@ -203,14 +203,15 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
   <form class="panel" id="newform" autocomplete="off" hidden>
     <input type="text" class="nm" id="newname" placeholder="short name, e.g. fix-login" aria-label="Name" required>
     <input type="text" class="folder" id="newfolder" value="" placeholder="folder" aria-label="Folder">
-    <label><input type="checkbox" id="newwt"> own worktree</label>
-    <button class="primary" type="submit">Start in tmux</button>
+    <label id="newwtlabel"><input type="checkbox" id="newwt"> own worktree</label>
+    <span class="hint" id="newhint" hidden>a shell in the misc tab; type kc sync, devxp or tilt in it</span>
+    <button class="primary" type="submit" id="newsubmit">Start in tmux</button>
     <button class="ghost" type="button" id="newcancel">Cancel</button>
   </form>
   <p class="warn" id="warn" hidden></p>
   <div id="groups"></div>
   <p class="keys" id="keys" hidden>Keys: type a window number, like <span class="mono">5</span>, to open it ·
-    <span class="mono">/</span> filter · <span class="mono">n</span> new session · right-click a session for more · <span class="mono">Esc</span> clear</p>
+    <span class="mono">/</span> filter · <span class="mono">n</span> new session (in Misc, a new tmux window) · right-click a session for more · <span class="mono">Esc</span> clear</p>
 </main>
 <div class="menu" id="menu" role="menu" hidden></div>
 <dialog id="dlg" aria-labelledby="dlgtitle">
@@ -800,9 +801,7 @@ function draw(data) {
   setLive(true, "Live · updated " + ago(data.updated));
   const folder = document.getElementById("newfolder");
   if (!folder.value && !folder.dataset.touched) folder.value = folderOf(tab, data);
-  // Claude sessions never start in the misc tab.
-  document.getElementById("newbtn").hidden = tab === "misc";
-  if (tab === "misc") closeNew();
+  newMode();
   appRunning = !!data.app_running;
   showAlerts();
 
@@ -838,7 +837,7 @@ function draw(data) {
       wins.forEach(w => box.append(winRow(w, data)));
       iterms.forEach(t => box.append(itermRow(t, data)));
       root.append(h, el("p", "note", tab === "misc"
-        ? "Every window in the misc tab. Click one to go there. In a terminal, t m NAME -- COMMAND opens another; t mv 3 moves window 3 here."
+        ? "Every window in the misc tab. Click one to go there. + New tmux window opens another, as t m NAME -- COMMAND does in a terminal; t mv 3 moves window 3 here."
         : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there."), box);
     }
     const list = sessions.filter(s => s.group === g);
@@ -863,8 +862,8 @@ function draw(data) {
   if (tab === "misc" ? !wins.length && !q : !here.length && !q) {
     const where = folderOf(tab, data);
     root.append(el("p", "calm", tab === "misc"
-      ? "Nothing in the misc tab. In a terminal, t m NAME -- COMMAND opens a window there for a shell or a command like kc sync; " +
-        "t mv 3 moves window 3 of the tab you're in."
+      ? "Nothing in the misc tab. + New tmux window opens a shell there for a command like kc sync, devxp or tilt. " +
+        "In a terminal, t m NAME -- COMMAND does the same, and t mv 3 moves window 3 of the tab you're in."
       : "No " + SPACES[tab].toLowerCase() + " sessions yet. + New session starts one" +
         (where ? " in " + where : "") + (tab === "personal" ? ", in its own iTerm tab" : "") + "."));
   } else if (q && !sessions.length && !wins.length && !iterms.length) {
@@ -973,18 +972,29 @@ showAlerts();
 
 // New session
 const newform = document.getElementById("newform");
-function openNew() { newform.hidden = false; document.getElementById("newname").focus(); }
+// In the misc tab the button opens a tmux window with a shell, never a Claude session. It takes no
+// command: the board server runs none for this page.
+function newMode() {
+  const misc = tab === "misc";
+  const btn = document.getElementById("newbtn");
+  btn.textContent = misc ? "+ New tmux window" : "+ New session";
+  btn.title = misc ? "Open a tmux window with a shell in the misc tab, for kc sync, devxp or tilt (n)"
+    : "Start a new Claude session in tmux (n)";
+  document.getElementById("newwtlabel").hidden = misc;
+  document.getElementById("newhint").hidden = !misc;
+  document.getElementById("newsubmit").textContent = misc ? "Open in tmux" : "Start in tmux";
+  document.getElementById("newname").placeholder = misc ? "short name, e.g. kc-sync" : "short name, e.g. fix-login";
+}
+function openNew() { newMode(); newform.hidden = false; document.getElementById("newname").focus(); }
 function closeNew() { newform.hidden = true; }
 document.getElementById("newbtn").addEventListener("click", () => newform.hidden ? openNew() : closeNew());
 document.getElementById("newcancel").addEventListener("click", closeNew);
 document.getElementById("newfolder").addEventListener("input", e => { e.target.dataset.touched = "1"; });
 newform.addEventListener("submit", e => {
   e.preventDefault();
-  post("/api/new", {
-    name: document.getElementById("newname").value.trim(),
-    folder: document.getElementById("newfolder").value.trim(),
-    worktree: document.getElementById("newwt").checked,
-  });
+  const name = document.getElementById("newname").value.trim(), folder = document.getElementById("newfolder").value.trim();
+  if (tab === "misc") post("/api/misc", { name, folder });
+  else post("/api/new", { name, folder, worktree: document.getElementById("newwt").checked });
   document.getElementById("newname").value = "";
   closeNew();
 });
@@ -1022,8 +1032,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "/") { e.preventDefault(); filter.focus(); }
   else if (e.key === "n") {
     e.preventDefault();
-    if (tab === "misc") toast("Claude sessions don't go in the misc tab. For a shell there: t m NAME in a terminal");
-    else openNew();
+    openNew();
   }
   else if (/^[0-9]$/.test(e.key)) {
     digits += e.key;
