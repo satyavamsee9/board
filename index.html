@@ -73,6 +73,7 @@ button.pill:hover { background:color-mix(in srgb, var(--c) 25%, transparent); }
   background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
 .panel input[type=text] { font:inherit; padding:6px 9px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
 .panel input.nm { width:200px; } .panel input.folder { flex:1; min-width:220px; }
+.panel input.resume { flex-basis:100%; }
 .panel label, .panel .hint { font-size:13px; color:var(--muted); }
 
 /* Groups */
@@ -128,7 +129,7 @@ details[open] > summary h2::before { content:"▾"; }
 
 /* Rows: idle and closed sessions, one line each. */
 .rows { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
-.row { display:grid; grid-template-columns:34px minmax(0,1fr) auto minmax(0,200px) 64px 96px; align-items:center; gap:10px;
+.row { display:grid; grid-template-columns:52px minmax(0,1fr) auto minmax(0,200px) 64px 96px; align-items:center; gap:10px;
   padding:6px 8px 6px 12px; border-top:1px solid var(--line); cursor:pointer; outline:none; }
 .row:first-child { border-top:0; }
 .row:hover, .row:focus-visible, .row.menu-on { background:var(--hover); }
@@ -138,11 +139,11 @@ details[open] > summary h2::before { content:"▾"; }
 .row .act { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
 /* Other terminals (tmux windows, iTerm tabs): window, name, what it runs, folder, last output. */
 .row.win { grid-template-columns:52px minmax(0,1fr) minmax(0,1.6fr) minmax(0,160px) 64px 96px; --c:var(--idle); }
-.row.win .num { white-space:nowrap; }
+.row .num { white-space:nowrap; }
 .cmd { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .cmd.idle { color:var(--faint); font:italic 12.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 @media (max-width:760px) {
-  .row { grid-template-columns:34px minmax(0,1fr) auto 56px 30px; }
+  .row { grid-template-columns:52px minmax(0,1fr) auto 56px 30px; }
   .row.win { grid-template-columns:52px minmax(0,1fr) minmax(0,1.4fr) 56px 30px; }
   .row .sub, .row .go { display:none; }
   .row .prs a:nth-child(n+2) { display:none; }
@@ -197,6 +198,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
     <input type="search" id="filter" placeholder="Filter by name, branch, PR, window or command ( / )" aria-label="Filter sessions and windows">
     <span class="grow"></span>
     <button class="ghost" id="alerts" type="button" title="Notify me when a session needs me or finishes">Alerts: off</button>
+    <button class="ghost" id="resumebtn" type="button" title="Bring back a session you know, in a new tmux window (r)">↻ Resume session</button>
     <button class="primary" id="newbtn" type="button" title="Start a new Claude session in tmux (n)">+ New session</button>
   </div>
 
@@ -208,10 +210,17 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
     <button class="primary" type="submit" id="newsubmit">Start in tmux</button>
     <button class="ghost" type="button" id="newcancel">Cancel</button>
   </form>
+  <form class="panel" id="resumeform" autocomplete="off" hidden>
+    <input type="text" class="resume" id="resumeid" placeholder="session id, or its claude --resume command" aria-label="Session to resume" required>
+    <input type="text" class="nm" id="resumename" placeholder="name (optional)" aria-label="Name">
+    <span class="hint">it comes back in the folder it started in</span>
+    <button class="primary" type="submit">Resume in tmux</button>
+    <button class="ghost" type="button" id="resumecancel">Cancel</button>
+  </form>
   <p class="warn" id="warn" hidden></p>
   <div id="groups"></div>
   <p class="keys" id="keys" hidden>Keys: type a window number, like <span class="mono">5</span>, to open it ·
-    <span class="mono">/</span> filter · <span class="mono">n</span> new session (in Misc, a new tmux window) · right-click a session or window for more · <span class="mono">Esc</span> clear</p>
+    <span class="mono">/</span> filter · <span class="mono">n</span> new session (in Misc, a new tmux window) · <span class="mono">r</span> resume a session · right-click a session or window for more · <span class="mono">Esc</span> clear</p>
 </main>
 <div class="menu" id="menu" role="menu" hidden></div>
 <dialog id="dlg" aria-labelledby="dlgtitle">
@@ -336,6 +345,7 @@ function favicon(group) {
 function showConnect(why) {
   CONTROLS.forEach(id => { document.getElementById(id).hidden = true; });
   document.getElementById("newform").hidden = true;
+  document.getElementById("resumeform").hidden = true;
   document.getElementById("attn").textContent = "";
   closeMenu();
   setLive(false, "Not connected");
@@ -600,6 +610,7 @@ function openMenu(s, owner, x, y) {
     add("Rename…", () => askRename(s));
     add("Fork…", () => askFork(s));
     if (s.resume) add("Copy resume command", () => copyText(s.resume));
+    if (s.where && s.where.kind === "iterm") add("Move into tmux…", () => askMove(s));
     if (s.where && s.where.kind === "tmux") {
       menu.append(el("hr"));
       add("Stop…", () => askStop(s), "bad");
@@ -730,6 +741,27 @@ function askFork(s) {
     check: "In its own git worktree (its own copy of the code, so the two don't edit the same files)",
     ok: "Fork",
     onOk: () => post("/api/fork", { id: s.id, name: dlgInput.value.trim(), worktree: document.getElementById("dlgcheck").checked }),
+  });
+}
+
+// Claude in a plain iTerm tab can't change terminals while it runs: the board closes it there and
+// resumes the same conversation in tmux, only while it waits for you.
+const waitingForYou = s => s.group === "idle" || s.group === "done" || s.status === "failed";
+function askMove(s) {
+  if (!waitingForYou(s)) {
+    toast(s.group === "working" ? "It's working. Move it into tmux once it's waiting for you."
+      : "It's waiting on a question or permission prompt. Answer it in its iTerm tab, then move it.");
+    return;
+  }
+  ask({
+    title: "Move into tmux?",
+    what: s.name,
+    text: "A running Claude can't change terminals, so this closes it in its iTerm tab and resumes the same " +
+      "conversation in a new window of the " + (spaceOf(s) === "personal" ? "personal" : "work") + " tab. " +
+      "The conversation comes back whole. Anything typed in that tab and not sent yet is lost, and background " +
+      "commands it started won't report back to it. The iTerm tab stays open at its shell.",
+    ok: "Move",
+    onOk: () => post("/api/to-tmux", { id: s.id }),
   });
 }
 
@@ -1034,8 +1066,11 @@ function newMode() {
   document.getElementById("newhint").hidden = !misc;
   document.getElementById("newsubmit").textContent = misc ? "Open in tmux" : "Start in tmux";
   document.getElementById("newname").placeholder = misc ? "short name, e.g. kc-sync" : "short name, e.g. fix-login";
+  // Resume brings back a Claude session, so it isn't offered in the misc tab.
+  document.getElementById("resumebtn").hidden = misc;
+  if (misc) closeResume();
 }
-function openNew() { newMode(); newform.hidden = false; document.getElementById("newname").focus(); }
+function openNew() { closeResume(); newMode(); newform.hidden = false; document.getElementById("newname").focus(); }
 function closeNew() { newform.hidden = true; }
 document.getElementById("newbtn").addEventListener("click", () => newform.hidden ? openNew() : closeNew());
 document.getElementById("newcancel").addEventListener("click", closeNew);
@@ -1047,6 +1082,29 @@ newform.addEventListener("submit", e => {
   else post("/api/new", { name, folder, worktree: document.getElementById("newwt").checked });
   document.getElementById("newname").value = "";
   closeNew();
+});
+
+// Resume a session you know: in a new tmux window, in the folder it started in (the board server finds
+// it, even one too old to be listed). One still running is never started twice.
+const resumeform = document.getElementById("resumeform");
+const SESSION_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+// By id, not resumeform: newMode can run before that line does.
+function openResume() { closeNew(); document.getElementById("resumeform").hidden = false; document.getElementById("resumeid").focus(); }
+function closeResume() { document.getElementById("resumeform").hidden = true; }
+document.getElementById("resumebtn").addEventListener("click", () => resumeform.hidden ? openResume() : closeResume());
+document.getElementById("resumecancel").addEventListener("click", closeResume);
+resumeform.addEventListener("submit", e => {
+  e.preventDefault();
+  const m = document.getElementById("resumeid").value.match(SESSION_ID);
+  if (!m) { toast("That isn't a session id. Paste one like 1a2b3c4d-…, or its claude --resume command."); return; }
+  const id = m[0].toLowerCase(), name = document.getElementById("resumename").value.trim();
+  const s = ((lastData || {}).sessions || []).find(x => x.id === id);
+  document.getElementById("resumeid").value = "";
+  document.getElementById("resumename").value = "";
+  closeResume();
+  // Running in a plain iTerm tab: move it (closed there first). In tmux, the server goes to it.
+  if (s && s.where && s.where.kind === "iterm") askMove(s);
+  else post("/api/new", { name, folder: "", resume: id });
 });
 
 // Filter
@@ -1075,6 +1133,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (e.target === filter && filter.value) { filter.value = ""; draw(lastData); }
     else if (!newform.hidden) closeNew();
+    else if (!resumeform.hidden) closeResume();
     if (typing) e.target.blur();
     return;
   }
@@ -1083,6 +1142,10 @@ document.addEventListener("keydown", e => {
   else if (e.key === "n") {
     e.preventDefault();
     openNew();
+  }
+  else if (e.key === "r" && tab !== "misc") {
+    e.preventDefault();
+    openResume();
   }
   else if (/^[0-9]$/.test(e.key)) {
     digits += e.key;
