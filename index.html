@@ -438,7 +438,14 @@ function prLinks(s) {
 
 const isRunning = s => !!(s.where && s.where.kind !== "none");
 
-function openOrResume(s) { post(isRunning(s) ? "/api/open" : "/api/resume", { id: s.id }); }
+// A double click is one click: the board server also never starts a session twice.
+const lastOpen = {};
+function openOrResume(s) {
+  const now = Date.now();
+  if (now - (lastOpen[s.id] || 0) < 3000) return;
+  lastOpen[s.id] = now;
+  post(isRunning(s) ? "/api/open" : "/api/resume", { id: s.id });
+}
 
 // Click opens it; right-click or ⋯ shows the menu.
 function clickable(n, s) {
