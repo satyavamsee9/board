@@ -211,7 +211,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
   <p class="warn" id="warn" hidden></p>
   <div id="groups"></div>
   <p class="keys" id="keys" hidden>Keys: type a window number, like <span class="mono">5</span>, to open it ·
-    <span class="mono">/</span> filter · <span class="mono">n</span> new session (in Misc, a new tmux window) · right-click a session for more · <span class="mono">Esc</span> clear</p>
+    <span class="mono">/</span> filter · <span class="mono">n</span> new session (in Misc, a new tmux window) · right-click a session or window for more · <span class="mono">Esc</span> clear</p>
 </main>
 <div class="menu" id="menu" role="menu" hidden></div>
 <dialog id="dlg" aria-labelledby="dlgtitle">
@@ -543,8 +543,28 @@ function otherRow(x, badgeEl, idleText, title, go, data) {
 
 function winRow(w, data) {
   const r = otherRow(w, el("span", "num", winLabel(w)), w.home ? "home: the session list and your shell" : "shell, nothing running",
-    "Go to window " + winLabel(w), () => goWindow(w), data);
+    "Go to window " + winLabel(w) + (w.home ? "" : " · right-click to close it"), () => goWindow(w), data);
   r.dataset.window = w.window;
+  r.addEventListener("contextmenu", e => { e.preventDefault(); openWinMenu(w, r, e.clientX, e.clientY); });
+  r.addEventListener("keydown", e => {
+    if (e.target === r && (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))) {
+      e.preventDefault();
+      const b = r.getBoundingClientRect();
+      openWinMenu(w, r, b.left + 16, b.top + 28);
+    }
+  });
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.title = w.home ? "More" : "More: close this window";
+  more.setAttribute("aria-label", "More actions for window " + winLabel(w));
+  more.setAttribute("aria-haspopup", "menu");
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === w.window) return closeMenu();
+    const b = more.getBoundingClientRect();
+    openWinMenu(w, r, b.right - 200, b.bottom + 4);
+  });
+  r.querySelector(".act").append(more);
   return r;
 }
 
@@ -575,6 +595,30 @@ function closeMenu() {
 }
 
 function openMenu(s, owner, x, y) {
+  showMenu(s.id, owner, x, y, add => {
+    add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
+    add("Rename…", () => askRename(s));
+    add("Fork…", () => askFork(s));
+    if (s.resume) add("Copy resume command", () => copyText(s.resume));
+    if (s.where && s.where.kind === "tmux") {
+      menu.append(el("hr"));
+      add("Stop…", () => askStop(s), "bad");
+    }
+  });
+}
+
+// A tmux window with no Claude session in it: go there, or close it (never home).
+function openWinMenu(w, owner, x, y) {
+  showMenu(w.window, owner, x, y, add => {
+    add("Go to window " + winLabel(w), () => goWindow(w));
+    if (!w.home) {
+      menu.append(el("hr"));
+      add("Close window…", () => askClose(w), "bad");
+    }
+  });
+}
+
+function showMenu(id, owner, x, y, build) {
   closeMenu();
   menu.textContent = "";
   const add = (label, fn, cls) => {
@@ -584,15 +628,8 @@ function openMenu(s, owner, x, y) {
     b.addEventListener("click", e => { e.stopPropagation(); closeMenu(); fn(); });
     menu.append(b);
   };
-  add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
-  add("Rename…", () => askRename(s));
-  add("Fork…", () => askFork(s));
-  if (s.resume) add("Copy resume command", () => copyText(s.resume));
-  if (s.where && s.where.kind === "tmux") {
-    menu.append(el("hr"));
-    add("Stop…", () => askStop(s), "bad");
-  }
-  menuFor = s.id;
+  build(add);
+  menuFor = id;
   menuOwner = owner;
   owner.classList.add("menu-on");
   menu.hidden = false;
@@ -618,7 +655,7 @@ async function copyText(text) {
   catch (e) { toast(text); }
 }
 
-// --- the Rename and Stop dialogs ----------------------------------------------------
+// --- the Rename, Stop and Close dialogs ---------------------------------------------
 
 const dlg = document.getElementById("dlg");
 const dlgInput = document.getElementById("dlginput");
@@ -705,6 +742,19 @@ function askStop(s) {
     ok: "Stop it",
     danger: true,
     onOk: () => post("/api/stop", { id: s.id }),
+  });
+}
+
+function askClose(w) {
+  const last = w.session === tmuxOf("misc") && ((lastData || {}).windows || []).filter(x => x.session === w.session).length === 1;
+  ask({
+    title: "Close window " + winLabel(w) + "?",
+    what: w.name,
+    text: (w.running ? "This stops what runs in it: " + w.command + "." : "It's a shell with nothing running in it.") +
+      (last ? " It's the last window in the misc tab, so that iTerm tab closes too." : ""),
+    ok: "Close it",
+    danger: true,
+    onOk: () => post("/api/close-window", { window: w.window }),
   });
 }
 
