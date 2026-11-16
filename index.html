@@ -389,6 +389,8 @@ async function post(path, body) {
 const winLabel = w => (boardSession(w.session) ? w.index : w.session + ":" + w.index);
 function badge(w) {
   if (!w || w.kind === "none") return null;
+  // Claude started by hand in a misc window: it's on Work or Personal, but its window is in misc.
+  if (w.kind === "tmux" && w.session === tmuxOf("misc")) return el("span", "num text", "misc " + w.index);
   if (w.kind === "tmux") return el("span", "num", winLabel(w));
   return el("span", "num text", w.kind === "iterm" ? "iTerm" : "bg");
 }
