@@ -219,6 +219,28 @@ dialog .dlgcheck input { width:auto; margin:0; }
   .row.apdone .dur { display:none; }
 }
 
+/* The Automations tab: one panel per automation, then its runs. */
+.autopanel .aphead .ghost { padding:3px 9px; font-size:12.5px; }
+.autopanel.off { opacity:.72; }
+.autowhat { font-size:13px; color:var(--muted); }
+.card .runnote { font-size:13px; color:var(--ink); margin-top:2px; padding-right:64px; }
+.card .about { font-size:12.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:64px; }
+.card.queued, .card.closed { --c:var(--idle); }
+.autopanel details { margin-top:2px; }
+.autopanel details > summary { list-style:none; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); }
+.autopanel details > summary::-webkit-details-marker { display:none; }
+.autopanel details > summary::before { content:"▸ "; }
+.autopanel details[open] > summary::before { content:"▾ "; }
+.autopanel .rows { margin-top:6px; }
+.row.run { grid-template-columns:72px minmax(0,1fr) auto minmax(0,260px) 116px 84px 30px; }
+.row.run .state { font-size:11.5px; font-weight:700; color:var(--c, var(--muted)); text-transform:uppercase; letter-spacing:.03em; }
+.row.run.missed .state, .row.run.failed .state { --c:var(--needs); }
+.row.run .note { font-size:12.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row.run .dur { color:var(--faint); font-size:12.5px; text-align:right; white-space:nowrap; }
+.row.run .dur .ghost { padding:2px 8px; font-size:12px; color:var(--ink); }
+.autoerr { color:var(--needs); font-size:13px; margin:10px 0 0; }
+@media (max-width:760px) { .row.run { grid-template-columns:80px minmax(0,1fr) auto 56px 30px; } .row.run .note, .row.run .dur { display:none; } }
+
 .empty { color:var(--muted); }
 .keys { color:var(--faint); font-size:12px; margin-top:28px; }
 .keys .mono { background:var(--chip); border-radius:4px; padding:0 4px; color:var(--muted); }
@@ -241,6 +263,7 @@ dialog .dlgcheck input { width:auto; margin:0; }
     <button class="tab" type="button" role="tab" data-space="work">Work <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="personal">Personal <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="misc">Misc <span class="tcount"></span><span class="tdot" hidden></span></button>
+    <button class="tab" type="button" role="tab" data-space="automations" hidden>Automations <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="autopilot" hidden>Autopilot <span class="tcount"></span><span class="tdot" hidden></span></button>
   </nav>
 
@@ -332,7 +355,7 @@ const STOP_WARN = {
 };
 // The misc tab holds shells and commands only, never a Claude session. The Autopilot tab holds
 // autopilot's own background sessions, which the server keeps out of the session list.
-const SPACES = { work: "Work", personal: "Personal", misc: "Misc", autopilot: "Autopilot" };
+const SPACES = { work: "Work", personal: "Personal", misc: "Misc", automations: "Automations", autopilot: "Autopilot" };
 // What each autopilot session does, by the role in the name autopilot gives it.
 const AP_ROLE = { dispatch: "Dispatcher pass", replies: "Answer check", "page refresh": "Page refresh",
   implement: "Implementing", review: "Reviewing", pr: "PR loop", worker: "Worker", other: "Autopilot run" };
@@ -863,6 +886,188 @@ function askWatch(s) {
   });
 }
 
+// --- automations: Claude sessions the board starts on a schedule or when a check finds work ---
+const autoData = data => (data && data.automations) || [];
+const hasAutomations = data => autoData(data).length > 0 || ((data && data.automation_errors) || []).length > 0;
+const RUN_STATE = { working: "Working", needs_you: "Needs you", done: "Ready for you", idle: "Seen, still open",
+  closed: "Closed, click to reopen", queued: "Waiting its turn", recent: "Done", missed: "Missed", failed: "Didn't start",
+  skipped: "Skipped" };
+const LIVE_RUN = ["needs_you", "done", "working", "idle", "closed", "queued"];
+const RUN_ORDER = ["needs_you", "done", "working", "queued", "idle", "closed"];
+const autoWaiting = data => autoData(data).flatMap(a => (a.runs || []).filter(r => r.group === "needs_you" || r.group === "done"));
+const tok = t => !t || !t.total ? "" : (t.total >= 1e6 ? (t.total / 1e6).toFixed(1) + "M" : Math.max(1, Math.round(t.total / 1000)) + "k") + " tokens";
+
+function runMatches(r, q) {
+  return matchesOther([r.title, r.about, r.by, r.note, r.outcome, ...(r.pr ? ["#" + r.pr.number, String(r.pr.number)] : [])], q);
+}
+
+function autoButton(text, title, fn) {
+  const b = el("button", "ghost", text);
+  b.type = "button"; b.title = title;
+  b.addEventListener("click", e => { e.stopPropagation(); fn(); });
+  return b;
+}
+
+function openRun(r) { post("/api/run", { run: r.id, do: "open" }); }
+
+function openRunMenu(r, owner, x, y) {
+  showMenu(r.id, owner, x, y, add => {
+    if (r.started_at) add("Open", () => openRun(r));
+    if (r.pr && r.pr.url) add("Open #" + r.pr.number + " on GitHub", () => window.open(r.pr.url, "_blank", "noopener"));
+    if (r.output) add("Copy the draft's path", () => copyText(r.output));
+    if (r.resume) add("Copy resume command", () => copyText(r.resume));
+    if (LIVE_RUN.includes(r.group) && r.group !== "queued") add("Mark done", () => post("/api/run", { run: r.id, do: "done" }));
+    if (!OPEN_RUN.includes(r.group)) add("Run again", () => runAgain(r));
+  });
+}
+
+// On demand, or after a run failed, was missed or was skipped.
+const OPEN_RUN = ["needs_you", "done", "working", "idle", "queued"];
+function runAgain(r) { post("/api/run", { run: r.id, do: "again" }); }
+
+function runCard(r) {
+  const b = el("div", "card " + r.group);
+  b.dataset.id = r.id;
+  b.tabIndex = 0; b.setAttribute("role", "button");
+  b.title = r.started_at ? "Jump into it in the auto tab · right-click for more" : "It starts on its own when a slot frees up";
+  if (r.started_at) {
+    b.addEventListener("click", () => openRun(r));
+    b.addEventListener("keydown", e => { if (e.target === b && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openRun(r); } });
+  }
+  b.addEventListener("contextmenu", e => { e.preventDefault(); openRunMenu(r, b, e.clientX, e.clientY); });
+  const top = el("div", "top");
+  const num = badge(r.where);
+  if (num) top.append(num);
+  top.append(el("span", "name", r.title + (r.again ? " · again" : "")));
+  const status = el("div", "status");
+  status.append(el("span", "dot"), el("span", "", RUN_STATE[r.group] + (r.group === "working" && r.status_since ? " · " + ago(r.status_since).replace(" ago", "") : "")));
+  const meta = el("div", "meta");
+  if (r.pr) meta.append(...prLinks({ prs: [r.pr] }));
+  if (r.by) meta.append(el("span", "", "by " + r.by));
+  if (r.started_at) meta.append(el("span", "", "started " + clock(r.started_at)));
+  if (r.model && r.pr) {
+    const m = el("span", "", r.model);
+    m.title = (r.size ? "It's " + r.size + ". " : "") + (r.source === "slack" ? "Found in the review channel." : "GitHub asked for your review.");
+    meta.append(m);
+  }
+  const t = tok(r.tokens);
+  if (t) {
+    const x = el("span", "", t);
+    x.title = Math.round(100 * (r.tokens.cache_read || 0) / r.tokens.total) + "% of them read from the prompt cache";
+    meta.append(x);
+  }
+  b.append(top, status, meta);
+  if (r.about) { const a = el("div", "about", r.about); a.title = r.about; b.append(a); }
+  if (r.note) b.append(el("div", "runnote", r.note));
+  const more = el("button", "more", "⋯");
+  more.type = "button"; more.title = "More";
+  more.setAttribute("aria-label", "More actions for " + r.title);
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === r.id) return closeMenu();
+    const x = more.getBoundingClientRect();
+    openRunMenu(r, b, x.right - 200, x.bottom + 4);
+  });
+  b.append(el("span", "go", r.started_at ? "Open →" : ""), more);
+  return b;
+}
+
+function runRow(r) {
+  const x = el("div", "row run " + r.group);
+  x.dataset.id = r.id;
+  if (r.started_at) x.addEventListener("click", () => openRun(r));
+  x.addEventListener("contextmenu", e => { e.preventDefault(); openRunMenu(r, x, e.clientX, e.clientY); });
+  x.title = r.started_at ? "Click to reopen it in the auto tab" : "";
+  const prs = el("span", "prs");
+  if (r.pr) prs.append(...prLinks({ prs: [r.pr] }));
+  const ran = span(r.started_at, r.ended_at);
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.setAttribute("aria-label", "More actions for " + r.title);
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === r.id) return closeMenu();
+    const b = more.getBoundingClientRect();
+    openRunMenu(r, x, b.right - 200, b.bottom + 4);
+  });
+  const act = el("span", "act");
+  act.append(more);
+  // One that never ran: Run again is the thing to do, so it's a button, not just a menu item.
+  let dur = el("span", "dur", ran ? "ran " + ran : "");
+  if (["failed", "missed", "skipped"].includes(r.group)) {
+    dur = el("span", "dur");
+    dur.append(autoButton("Run again", "Start it now, in the auto tab", () => runAgain(r)));
+  }
+  const note = [r.note, r.outcome].filter(Boolean).join(" · ");
+  const n = el("span", "note", note);
+  n.title = note;
+  x.append(el("span", "state", RUN_STATE[r.group] || r.group), el("span", "name", r.title), prs, n,
+    el("span", "when", clock(r.started_at || r.created_at)), dur, act);
+  return x;
+}
+
+let autoEarlierOpen = {};
+
+function autoPanel(a, q) {
+  const box = el("section", "appanel autopanel" + (a.on ? "" : " off"));
+  const head = el("div", "aphead");
+  head.append(el("span", "apname", a.name), el("span", "apstate " + (a.on ? "active" : "stopped"), a.on ? "On" : "Off"),
+    el("span", "apsource", a.when), el("span", "grow"));
+  if (a.check === "review-requests") head.append(autoButton("Review a PR…", "Review one PR now: one you were pinged about, or a draft", () => askReview(a)));
+  if (a.kind === "check") head.append(autoButton("Check now", "Look for work now, even outside its hours", () => post("/api/automation", { id: a.id, do: "check" })));
+  else head.append(autoButton("Run now", "Start a run now, in the auto tab", () => post("/api/automation", { id: a.id, do: "run" })));
+  if (a.kind === "time" && a.on) {
+    const skipping = a.skip && a.skip === a.next_at;
+    head.append(autoButton(skipping ? "Don't skip" : "Skip next", skipping ? "Run it as usual" : "Skip the next run, for a day off",
+      () => post("/api/automation", { id: a.id, do: skipping ? "unskip" : "skip" })));
+  }
+  head.append(autoButton(a.on ? "Turn off" : "Turn on", a.on ? "No new checks or runs until you turn it back on" : "Start it again",
+    () => post("/api/automation", { id: a.id, do: a.on ? "off" : "on" })));
+  box.append(head);
+  if (a.what) box.append(el("div", "autowhat", a.what));
+  box.append(el("div", "apfoot", a.status_line + (a.slack && a.slack !== "phone" ? " · pings " + a.slack : " · pings your phone channel")));
+  const runs = (a.runs || []).filter(r => runMatches(r, q));
+  const live = runs.filter(r => LIVE_RUN.includes(r.group));
+  live.sort((x, y) => RUN_ORDER.indexOf(x.group) - RUN_ORDER.indexOf(y.group) || (y.started_at || 0) - (x.started_at || 0));
+  if (live.length) {
+    const grid = el("div", "grid apgrid");
+    live.forEach(r => grid.append(runCard(r)));
+    box.append(grid);
+  }
+  const earlier = runs.filter(r => !LIVE_RUN.includes(r.group));
+  if (earlier.length) {
+    const d = el("details");
+    d.open = !!q || !!autoEarlierOpen[a.id];
+    d.addEventListener("toggle", () => { if (!q) autoEarlierOpen[a.id] = d.open; });
+    d.append(el("summary", "", "Earlier, last 30 days · " + earlier.length));
+    const rows = el("div", "rows");
+    earlier.forEach(r => rows.append(runRow(r)));
+    d.append(rows);
+    box.append(d);
+  }
+  if (!(a.runs || []).length) box.append(el("div", "apfoot", "No runs yet."));
+  return box;
+}
+
+// On demand, whatever the checks found: a PR you were pinged about, or a draft.
+function askReview(a) {
+  ask({
+    title: "Review a PR",
+    text: "Paste its link, or just the number for the main repo. The review starts now in the auto tab and waits for you, " +
+      "like the others; drafts too.",
+    input: "",
+    ok: "Review",
+    onOk: () => { const pr = dlgInput.value.trim(); if (pr) post("/api/automation", { id: a.id, do: "review", pr }); },
+  });
+}
+
+function drawAutomations(data, root, q) {
+  root.append(el("p", "note apintro", "Claude sessions the board starts for you, on a schedule or when a check finds work. " +
+    "Each run opens in the auto tmux tab and pings Slack when it's ready for you or needs you. Click a run to jump in."));
+  ((data && data.automation_errors) || []).forEach(e => root.append(el("p", "autoerr", "Not loaded: " + e)));
+  autoData(data).forEach(a => root.append(autoPanel(a, q)));
+}
+
 function drawAutopilot(data, root, q) {
   const a = apData(data) || {};
   const projects = a.projects || [];
@@ -1235,10 +1440,32 @@ function drawHeader(data, all, here) {
     attn.append(b);
   }
 
+  const waitingRuns = autoWaiting(data);
+  if (waitingRuns.length) {
+    const need = waitingRuns.some(r => r.group === "needs_you");
+    const b = el("button", "pill " + (need ? "needs_you" : "done"), "Automations: " + waitingRuns.length +
+      (need ? (waitingRuns.length > 1 ? " need you" : " needs you") : " ready for you"));
+    b.type = "button";
+    b.title = "Open the Automations tab";
+    b.addEventListener("click", () => setTab("automations"));
+    attn.append(b);
+  }
+
   // Each tab: how many sessions are open there (windows, in the misc tab), and a dot when one
   // needs you or is done.
   document.querySelectorAll(".tab").forEach(t => {
     const space = t.dataset.space;
+    if (space === "automations") {
+      t.hidden = !hasAutomations(data);
+      t.setAttribute("aria-selected", String(tab === "automations"));
+      t.querySelector(".tcount").textContent = String(autoData(data).flatMap(a => (a.runs || []).filter(r => LIVE_RUN.includes(r.group) && r.group !== "queued")).length);
+      const dot = t.querySelector(".tdot");
+      const need = waitingRuns.some(r => r.group === "needs_you");
+      dot.hidden = !waitingRuns.length;
+      dot.className = "tdot " + (need ? "needs_you" : "done");
+      t.title = waitingRuns.length ? waitingRuns.length + (waitingRuns.length > 1 ? " runs wait" : " run waits") + " for you" : "";
+      return;
+    }
     if (space === "autopilot") {
       t.hidden = !hasAutopilot(data);
       t.setAttribute("aria-selected", String(tab === "autopilot"));
@@ -1280,8 +1507,9 @@ function drawHeader(data, all, here) {
 
   // The browser tab counts every session, whichever tab of the board is showing.
   const total = countGroups(all);
-  favicon(cards.length ? "needs_you" : ["needs_you", "done", "working", "stopped"].find(g => total[g]));
-  const attention = (total.needs_you || 0) + (total.done || 0) + cards.length;
+  const runNeeds = waitingRuns.some(r => r.group === "needs_you"), runDone = waitingRuns.some(r => r.group === "done");
+  favicon(cards.length || runNeeds ? "needs_you" : total.needs_you ? "needs_you" : total.done || runDone ? "done" : ["working", "stopped"].find(g => total[g]));
+  const attention = (total.needs_you || 0) + (total.done || 0) + cards.length + waitingRuns.length;
   document.title = (attention ? "(" + attention + ") " : "") + "Claude sessions";
 }
 
@@ -1299,6 +1527,7 @@ function draw(data) {
   lastData = data;
   closeMenu();
   if (tab === "autopilot" && !hasAutopilot(data)) tab = "work";
+  if (tab === "automations" && !hasAutomations(data)) tab = "work";
   const all = data.sessions || [];
   const here = all.filter(s => spaceOf(s) === tab);
   drawHeader(data, all, here);
@@ -1323,6 +1552,7 @@ function draw(data) {
   if (apDoneEl && !q) apDoneOpen = apDoneEl.open;
   root.textContent = "";
   if (tab === "autopilot") return drawAutopilot(data, root, q);
+  if (tab === "automations") return drawAutomations(data, root, q);
   // Favorites first, whatever state they're in, and nowhere else on the tab.
   const favs = sessions.filter(s => s.favorite);
   if (favs.length) {
@@ -1457,7 +1687,8 @@ async function load() {
     // A terminal's last-output time changes all the time; the 30s redraw keeps it fresh enough.
     const wins = (data.windows || []).map(w => [w.window, w.session, w.index, w.name, w.command, w.cwd]);
     const iterms = (data.tabs || []).map(t => [t.tty, t.name, t.command, t.cwd]);
-    const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, data.autopilot, [...fresh]]);
+    const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, data.autopilot, data.automations,
+      data.automation_errors, [...fresh]]);
     const busy = !menu.hidden || dlg.open;
     if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
@@ -1501,10 +1732,11 @@ function newMode() {
   document.getElementById("newsubmit").textContent = misc ? "Open in tmux" : "Start in tmux";
   document.getElementById("newname").placeholder = misc ? "short name, e.g. kc-sync" : "short name, e.g. fix-login";
   // Resume brings back a Claude session, so it isn't offered in the misc tab. Autopilot starts its own.
-  document.getElementById("resumebtn").hidden = misc || tab === "autopilot";
-  btn.hidden = tab === "autopilot";
-  if (misc || tab === "autopilot") closeResume();
-  if (tab === "autopilot") closeNew();
+  const own = tab === "autopilot" || tab === "automations";  // these start their own sessions
+  document.getElementById("resumebtn").hidden = misc || own;
+  btn.hidden = own;
+  if (misc || own) closeResume();
+  if (own) closeNew();
 }
 function openNew() { closeResume(); newMode(); newform.hidden = false; document.getElementById("newname").focus(); }
 function closeNew() { newform.hidden = true; }
@@ -1575,11 +1807,11 @@ document.addEventListener("keydown", e => {
   }
   if (typing) return;
   if (e.key === "/") { e.preventDefault(); filter.focus(); }
-  else if (e.key === "n" && tab !== "autopilot") {
+  else if (e.key === "n" && tab !== "autopilot" && tab !== "automations") {
     e.preventDefault();
     openNew();
   }
-  else if (e.key === "r" && tab !== "misc" && tab !== "autopilot") {
+  else if (e.key === "r" && tab !== "misc" && tab !== "autopilot" && tab !== "automations") {
     e.preventDefault();
     openResume();
   }
