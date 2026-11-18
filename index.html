@@ -166,9 +166,50 @@ dialog p.what { color:var(--ink); font-weight:600; }
 dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg);
   color:var(--ink); margin:2px 0 12px; }
 .dlgcheck { display:flex; align-items:center; gap:7px; font-size:13.5px; margin:-4px 0 14px; cursor:pointer; }
+dialog .dlgcheck input { width:auto; margin:0; }
 .dlgbtns { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
 .from { color:var(--faint); }
 .dlgbtns .left { margin-right:auto; }
+
+/* The Autopilot tab: one panel per autopilot, then what runs now and what finished. */
+.appanel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 13px; box-shadow:var(--shadow);
+  margin-top:18px; display:grid; gap:9px; }
+.aphead { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+.apname { font-weight:700; font-size:15.5px; }
+.apstate { font-size:12px; font-weight:600; border-radius:999px; padding:1px 8px; color:var(--c);
+  background:color-mix(in srgb, var(--c) 14%, transparent); }
+.apstate.active { --c:var(--done); } .apstate.paused { --c:var(--stopped); } .apstate.stopped { --c:var(--idle); }
+.apsource { color:var(--muted); font-size:13px; }
+.aplink { font-size:13px; text-decoration:none; } .aplink:hover { text-decoration:underline; }
+.aptasks { display:flex; flex-wrap:wrap; gap:4px 16px; font-size:13px; color:var(--muted); }
+.aptask { display:inline-flex; align-items:center; gap:6px; }
+.aptask b { color:var(--ink); font-weight:600; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+.aptask.done b { color:var(--muted); }
+.apcards { display:grid; gap:6px; }
+.apcard { --c:var(--needs); display:flex; align-items:baseline; gap:9px; padding:7px 10px; border-radius:8px; text-decoration:none;
+  color:var(--ink); background:color-mix(in srgb, var(--c) 8%, transparent); border:1px solid color-mix(in srgb, var(--c) 22%, transparent); }
+.apcard:hover { background:color-mix(in srgb, var(--c) 13%, transparent); }
+.apcard .kind { flex:none; font-size:11.5px; font-weight:700; color:var(--c); text-transform:uppercase; letter-spacing:.04em; }
+.apcard .t { flex:1; min-width:0; }
+.apcard .go { opacity:1; position:static; background:none; padding:0; }
+.apfoot { font-size:12.5px; color:var(--muted); }
+.row.apdone { grid-template-columns:62px minmax(0,1fr) auto minmax(0,140px) 64px 76px 30px; cursor:default; --c:var(--idle); }
+.row.apdone:hover { background:none; }
+.row.apdone .dur { color:var(--faint); font-size:12.5px; text-align:right; white-space:nowrap; }
+.row.apmore { display:block; width:100%; text-align:left; background:none; border:0; border-top:1px solid var(--line);
+  padding:7px 12px; color:var(--accent); font-size:13px; }
+.row.apmore:first-child { border-top:0; }
+.row.aplabel { display:block; cursor:default; padding:6px 12px 5px; font-size:12px; font-weight:700; color:var(--muted);
+  background:color-mix(in srgb, var(--chip) 55%, transparent); }
+.row.aplabel:hover { background:color-mix(in srgb, var(--chip) 55%, transparent); }
+.apintro { margin:16px 0 0; }
+.appanel .apgrid { margin-top:2px; }
+.appanel .card { box-shadow:none; background:var(--bg); }
+.appanel .card .go { background:var(--bg); }
+@media (max-width:760px) {
+  .row.apdone { grid-template-columns:62px minmax(0,1fr) auto 56px 30px; }
+  .row.apdone .dur { display:none; }
+}
 
 .empty { color:var(--muted); }
 .keys { color:var(--faint); font-size:12px; margin-top:28px; }
@@ -192,6 +233,7 @@ dialog input { font:inherit; width:100%; padding:7px 10px; border:1px solid var(
     <button class="tab" type="button" role="tab" data-space="work">Work <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="personal">Personal <span class="tcount"></span><span class="tdot" hidden></span></button>
     <button class="tab" type="button" role="tab" data-space="misc">Misc <span class="tcount"></span><span class="tdot" hidden></span></button>
+    <button class="tab" type="button" role="tab" data-space="autopilot" hidden>Autopilot <span class="tcount"></span><span class="tdot" hidden></span></button>
   </nav>
 
   <div class="tools" id="tools" hidden>
@@ -280,8 +322,17 @@ const STOP_WARN = {
   needs_you: "Claude is waiting for your answer in it.",
   done: "Claude finished in it, and you haven't looked at it yet.",
 };
-// The misc tab holds shells and commands only, never a Claude session.
-const SPACES = { work: "Work", personal: "Personal", misc: "Misc" };
+// The misc tab holds shells and commands only, never a Claude session. The Autopilot tab holds
+// autopilot's own background sessions, which the server keeps out of the session list.
+const SPACES = { work: "Work", personal: "Personal", misc: "Misc", autopilot: "Autopilot" };
+// What each autopilot session does, by the role in the name autopilot gives it.
+const AP_ROLE = { dispatch: "Dispatcher pass", replies: "Answer check", "page refresh": "Page refresh",
+  implement: "Implementing", review: "Reviewing", pr: "PR loop", worker: "Worker", other: "Autopilot run" };
+// The sessions that serve every autopilot; any other role is a worker on one task.
+const AP_KIND = { dispatch: "pass", replies: "check", "page refresh": "page", other: "run" };
+const AP_STATUS = { active: "Active", paused: "Paused", stopped: "Stopped" };
+const TASK_WORD = { todo: "to do", in_progress: "in progress", in_review: "in review", done: "done", blocked: "blocked", skipped: "skipped" };
+const CARD_KIND = { ask: "Question", gate: "Your step", system: "Fix needed" };
 // Each tab's tmux session (the board server says; these are its names).
 const tmuxOf = space => ({ work: "claude", personal: "personal", misc: "misc", ...((lastData && lastData.tmux_sessions) || {}) })[space];
 const boardSession = name => Object.keys(SPACES).some(sp => tmuxOf(sp) === name);
@@ -293,7 +344,8 @@ const CONTROLS = ["usage", "tabs", "tools", "keys"];
 let prev = null;
 const fresh = new Set();  // sessions that made a sound and haven't been looked at since
 let lastKey = "", lastDraw = 0, lastData = null;
-let recentOpen = false;
+let recentOpen = false, apDoneOpen = false, apRoutineOpen = false;
+let prevCards = null;  // autopilot cards already seen, so only a new one makes a sound
 let alertsOn = false;
 let appRunning = false;
 let tab = "work";
@@ -528,6 +580,282 @@ function row(s, data) {
   if (s.forked_from) nm.title = fromTag(s).title;
   r.append(badge(s.where) || el("span"), nm, prs, subline(s, data), el("span", "when", ago(when)), act);
   return r;
+}
+
+// --- autopilot: its own background sessions, and the cards that wait for you on its page ---
+
+const apData = data => (data && data.autopilot) || null;
+const hasAutopilot = data => {
+  const a = apData(data);
+  return !!a && ((a.projects || []).length + (a.running || []).length + (a.finished || []).length) > 0;
+};
+const apCards = data => ((apData(data) || {}).projects || []).flatMap(p => (p.cards || []).map(c => ({ ...c, ap: p.name })));
+const apName = s => (s.task ? s.task + " · " : "") + (AP_ROLE[s.role] || s.role || s.name);
+const apBadge = s => el("span", "num text", AP_KIND[s.role] || "worker");
+
+function clock(epoch) {
+  if (!epoch) return "";
+  const d = new Date(epoch * 1000), today = new Date().toDateString() === d.toDateString();
+  return (today ? "" : d.toLocaleDateString([], { month: "short", day: "numeric" }) + ", ") +
+    d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function span(from, to) {
+  if (!from || !to || to < from) return "";
+  const m = Math.round((to - from) / 60);
+  return m < 1 ? "under a minute" : m < 60 ? m + " min" : Math.floor(m / 60) + "h " + (m % 60) + "m";
+}
+
+// In the header on every tab: a card waiting for you, or what autopilot is running.
+function apBusyText(running) {
+  const pass = running.some(s => s.role === "dispatch");
+  const workers = running.filter(s => !AP_KIND[s.role]).length;
+  const w = workers + (workers > 1 ? " workers" : " worker");
+  if (pass && workers) return "pass running, " + w;
+  if (pass) return "pass running";
+  if (workers) return w + " running";
+  return "a check running";
+}
+
+function apMatches(s, q) {
+  return matchesOther([apName(s), s.name, s.ap, s.task, s.role, shortPath(s.cwd), ...(s.prs || []).map(p => "#" + p.number + " " + p.number)], q);
+}
+
+function apTally(list) {
+  const n = role => list.filter(s => s.role === role).length;
+  const workers = list.filter(s => !AP_KIND[s.role]).length;
+  return [[n("dispatch"), "dispatcher pass", "dispatcher passes"], [n("replies"), "answer check", "answer checks"],
+    [n("page refresh"), "page refresh", "page refreshes"], [n("other"), "other run", "other runs"], [workers, "worker", "workers"]]
+    .filter(([c]) => c).map(([c, one, many]) => c + " " + (c > 1 ? many : one)).join(", ");
+}
+
+// A session that serves every autopilot (a pass, an answer check, the page refresh), or a worker
+// whose autopilot is no longer listed.
+const apShared = (s, projects) => !!AP_KIND[s.role] || !projects.some(p => p.name === s.ap);
+
+function pageLink(a) {
+  const l = el("a", "aplink", "Open autopilot's page ↗");
+  l.href = a.page; l.target = "_blank"; l.rel = "noopener";
+  l.title = "One page for all your autopilots: cards, tasks and reports";
+  return l;
+}
+
+// What all autopilots share: one pass at a time covers every autopilot in a repo, and one page shows them all.
+function apSharedPanel(a, running, projects) {
+  const box = el("section", "appanel apshared");
+  const head = el("div", "aphead");
+  head.append(el("span", "apname", "All autopilots"), el("span", "apsource", "one pass at a time, one page"));
+  head.append(el("span", "grow"));
+  if (a.page) head.append(pageLink(a));
+  box.append(head);
+  const shared = running.filter(s => apShared(s, projects));
+  if (shared.length) {
+    const grid = el("div", "grid apgrid");
+    shared.forEach(s => grid.append(apCard(s)));
+    box.append(grid);
+  }
+  if (!running.some(s => s.role === "dispatch")) {
+    const last = Math.max(0, ...projects.map(p => p.last_pass_at || 0));
+    const allStopped = projects.length && projects.every(p => p.status !== "active");
+    box.append(el("div", "apfoot", "No pass running." + (last ? " The last one was " + clock(last) + " (" + ago(last) + ")." : "") +
+      (allStopped ? " No autopilot is active, so no more passes start." : "")));
+  }
+  return box;
+}
+
+function apPanel(p, a, running) {
+  const box = el("section", "appanel");
+  const head = el("div", "aphead");
+  head.append(el("span", "apname", p.name), el("span", "apstate " + p.status, AP_STATUS[p.status] || p.status));
+  if (p.source) head.append(el("span", "apsource", p.source));
+  box.append(head);
+  if ((p.cards || []).length) {
+    const list = el("div", "apcards");
+    p.cards.forEach(c => {
+      const x = el(a.page ? "a" : "div", "apcard");
+      if (a.page) { x.href = a.page; x.target = "_blank"; x.rel = "noopener"; x.title = "Answer it on autopilot's page"; }
+      x.append(el("span", "kind", CARD_KIND[c.kind] || "Card"), el("span", "t", c.title));
+      if (a.page) x.append(el("span", "go", "Answer ↗"));
+      list.append(x);
+    });
+    box.append(list);
+  }
+  if ((p.tasks || []).length) {
+    const tasks = el("div", "aptasks");
+    p.tasks.forEach(t => {
+      const worker = (a.running || []).find(s => s.ap === p.name && s.task === t.id && !AP_KIND[s.role]);
+      const x = el("span", "aptask " + t.status);
+      x.append(el("b", "", t.id), el("span", "", worker ? AP_ROLE[worker.role] || worker.role : TASK_WORD[t.status] || t.status));
+      if (t.pr && typeof t.pr.url === "string") x.append(...prLinks({ prs: [t.pr] }));
+      x.title = t.title || "";
+      tasks.append(x);
+    });
+    box.append(tasks);
+  }
+  // Its own workers, inside its panel.
+  const mine = running.filter(s => s.ap === p.name && !AP_KIND[s.role]);
+  if (mine.length) {
+    const grid = el("div", "grid apgrid");
+    mine.forEach(s => grid.append(apCard(s)));
+    box.append(grid);
+  }
+  const foot = p.status === "stopped" ? "Stopped: it starts no more workers." : p.status === "paused" ? "Paused: no new work until you resume it."
+    : mine.length ? "" : "No worker running for it right now.";
+  if (foot) box.append(el("div", "apfoot", foot));
+  return box;
+}
+
+// A running autopilot session: click to watch it live. Nothing here resumes, renames or stops one;
+// autopilot does that itself.
+function apCard(s) {
+  const b = el("div", "card ap " + s.group);
+  b.dataset.id = s.id;
+  b.tabIndex = 0;
+  b.setAttribute("role", "button");
+  b.title = "Watch it live in a tmux window · right-click for more";
+  b.addEventListener("click", () => askWatch(s));
+  b.addEventListener("keydown", e => {
+    if (e.target === b && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); askWatch(s); }
+  });
+  b.addEventListener("contextmenu", e => { e.preventDefault(); openApMenu(s, b, e.clientX, e.clientY, true); });
+  const top = el("div", "top");
+  top.append(apBadge(s), el("span", "name", apName(s)));
+  const status = el("div", "status");
+  status.append(el("span", "dot"), el("span", "", s.group === "working" ? "Working" + (s.status_since ? " · " + ago(s.status_since).replace(" ago", "") : "")
+    : s.group === "needs_you" ? "Stopped at a permission prompt" : "Waiting for autopilot"));
+  const meta = el("div", "meta");
+  meta.append(...prLinks(s));
+  if (s.started_at) meta.append(el("span", "", "started " + clock(s.started_at)));
+  // A pass names the autopilots it covers; a worker sits in its autopilot's panel, so its folder is enough.
+  const sub = el("span", "sub", s.role === "dispatch" && (s.covers || []).length ? "for " + s.covers.join(", ") : shortPath(s.cwd));
+  sub.title = s.cwd || "";
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.title = "More";
+  more.setAttribute("aria-label", "More actions for " + apName(s));
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === s.id) return closeMenu();
+    const r = more.getBoundingClientRect();
+    openApMenu(s, b, r.right - 200, r.bottom + 4, true);
+  });
+  b.append(top, status, meta, sub, el("span", "go", "Watch ↗"), more);
+  return b;
+}
+
+function apRow(s) {
+  const r = el("div", "row apdone");
+  r.dataset.id = s.id;
+  r.title = "Ended " + clock(s.ended_at) + ". Autopilot ended it itself; the board doesn't resume it.";
+  r.addEventListener("contextmenu", e => { e.preventDefault(); openApMenu(s, r, e.clientX, e.clientY, false); });
+  const prs = el("span", "prs");
+  prs.append(...prLinks(s));
+  const sub = el("span", "sub", s.role === "dispatch" && (s.covers || []).length ? "for " + s.covers.join(", ") : "");
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.setAttribute("aria-label", "More actions for " + apName(s));
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    if (menuFor === s.id) return closeMenu();
+    const b = more.getBoundingClientRect();
+    openApMenu(s, r, b.right - 200, b.bottom + 4, false);
+  });
+  const act = el("span", "act");
+  act.append(more);
+  const ran = span(s.started_at, s.ended_at);
+  r.append(apBadge(s), el("span", "name", apName(s)), prs, sub, el("span", "when", ago(s.ended_at)), el("span", "dur", ran ? "ran " + ran : ""), act);
+  return r;
+}
+
+function openApMenu(s, owner, x, y, live) {
+  showMenu(s.id, owner, x, y, add => {
+    if (live) add("Watch it live", () => askWatch(s));
+    add("Copy session id", () => copyText(s.id));
+  });
+}
+
+// Watching opens `claude attach` in a tmux window: it is autopilot's session, so say what typing does.
+function askWatch(s) {
+  const go = () => {
+    const now = Date.now();
+    if (now - (lastOpen[s.id] || 0) < 3000) return;
+    lastOpen[s.id] = now;
+    post("/api/watch", { id: s.id });
+  };
+  let skip = false;
+  try { skip = localStorage.getItem("apWatchOk") === "1"; } catch (e) {}
+  if (skip) return go();
+  ask({
+    title: "Watch it live?",
+    what: apName(s),
+    text: "It opens in a new window of the work tab. It's autopilot's session, so anything you type there goes to it. " +
+      "Close the window when you're done; the session keeps running.",
+    check: "Don't ask again",
+    ok: "Watch",
+    onOk: () => {
+      if (document.getElementById("dlgcheck").checked) try { localStorage.setItem("apWatchOk", "1"); } catch (e) {}
+      go();
+    },
+  });
+}
+
+function drawAutopilot(data, root, q) {
+  const a = apData(data) || {};
+  const projects = a.projects || [];
+  const running = (a.running || []).filter(s => apMatches(s, q));
+  const finished = (a.finished || []).filter(s => apMatches(s, q));
+  root.append(el("p", "note apintro", "Autopilot's own background sessions; it starts and ends them itself. Click a running one to watch it live."));
+  root.append(apSharedPanel(a, running, projects));
+  projects.forEach(p => root.append(apPanel(p, a, running)));
+  if (q && !running.length && !finished.length) root.append(el("p", "calm", "No autopilot session matches “" + q + "”."));
+  if (finished.length) {
+    const d = el("details");
+    d.dataset.k = "apdone";
+    d.open = apDoneOpen || !!q;
+    const sum = el("summary"), h2 = el("h2");
+    h2.append(el("span", "", "Finished, last 24 hours"), el("span", "count", String(finished.length)));
+    sum.append(h2);
+    d.append(sum, el("p", "note", apTally(finished) + ". Autopilot ended these itself, so they aren't stopped work and the board doesn't resume them."));
+    // Workers did the work, so each gets a row; the many short passes and checks fold into one line.
+    const workers = finished.filter(s => !AP_KIND[s.role]), routine = finished.filter(s => AP_KIND[s.role]);
+    const box = el("div", "rows");
+    // Grouped by autopilot, in the panels' order.
+    const order = [...projects.map(p => p.name), ...workers.map(s => s.ap || "")].filter((n, i, all) => all.indexOf(n) === i);
+    order.forEach(n => {
+      const mine = workers.filter(s => (s.ap || "") === n);
+      if (!mine.length) return;
+      box.append(el("div", "row aplabel", n || "No longer listed"));
+      mine.forEach(s => box.append(apRow(s)));
+    });
+    if (routine.length) {
+      const showAll = apRoutineOpen || !!q;
+      const line = el("button", "row apmore", (showAll ? "Hide the " : "Show the ") + apTally(routine) +
+        (showAll ? "" : ", the last " + ago(Math.max(...routine.map(s => s.ended_at || 0)))));
+      line.type = "button";
+      line.addEventListener("click", () => { apRoutineOpen = !apRoutineOpen; draw(lastData); });
+      box.append(line);
+      if (showAll) routine.forEach(s => box.append(apRow(s)));
+    }
+    d.append(box);
+    root.append(d);
+  }
+}
+
+// A new card on autopilot's page is the one autopilot event that waits on you: a sound and a banner.
+function apAlerts(data) {
+  const cards = apCards(data);
+  const seen = prevCards;
+  prevCards = new Set(cards.map(c => c.ap + "/" + c.id));
+  if (!seen || !alertsOn || appRunning) return;
+  cards.filter(c => !seen.has(c.ap + "/" + c.id)).forEach(c => {
+    beep("needs");
+    try {
+      if (Notification.permission === "granted") {
+        const n = new Notification("Autopilot " + c.ap + ": " + c.title, { body: "Click to see it on the board." });
+        n.onclick = () => { window.focus(); setTab("autopilot"); n.close(); };
+      }
+    } catch (e) {}
+  });
 }
 
 // --- other terminals: tmux windows and plain iTerm tabs with no Claude session in them ---
@@ -830,11 +1158,31 @@ function drawHeader(data, all, here) {
       attn.append(el("span", "pill " + g, text(n)));
     }
   });
+  // Autopilot, on every tab: a card waiting for you on its page, or what it's running.
+  const cards = apCards(data), running = (apData(data) || {}).running || [];
+  if (cards.length || running.length) {
+    const b = el("button", "pill " + (cards.length ? "needs_you" : "working"), "Autopilot: " +
+      (cards.length ? cards.length + (cards.length > 1 ? " cards" : " card") + " for you" : apBusyText(running)));
+    b.type = "button";
+    b.title = "Open the Autopilot tab";
+    b.addEventListener("click", () => setTab("autopilot"));
+    attn.append(b);
+  }
 
   // Each tab: how many sessions are open there (windows, in the misc tab), and a dot when one
   // needs you or is done.
   document.querySelectorAll(".tab").forEach(t => {
     const space = t.dataset.space;
+    if (space === "autopilot") {
+      t.hidden = !hasAutopilot(data);
+      t.setAttribute("aria-selected", String(tab === "autopilot"));
+      t.querySelector(".tcount").textContent = String(running.length);
+      const dot = t.querySelector(".tdot");
+      dot.hidden = !cards.length;
+      dot.className = "tdot needs_you";
+      t.title = cards.length ? cards.length + (cards.length > 1 ? " cards wait" : " card waits") + " for you on autopilot's page" : "";
+      return;
+    }
     const mine = all.filter(s => spaceOf(s) === space);
     const c = countGroups(mine);
     t.setAttribute("aria-selected", String(space === tab));
@@ -866,8 +1214,8 @@ function drawHeader(data, all, here) {
 
   // The browser tab counts every session, whichever tab of the board is showing.
   const total = countGroups(all);
-  favicon(["needs_you", "done", "working", "stopped"].find(g => total[g]));
-  const attention = (total.needs_you || 0) + (total.done || 0);
+  favicon(cards.length ? "needs_you" : ["needs_you", "done", "working", "stopped"].find(g => total[g]));
+  const attention = (total.needs_you || 0) + (total.done || 0) + cards.length;
   document.title = (attention ? "(" + attention + ") " : "") + "Claude sessions";
 }
 
@@ -884,6 +1232,7 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
 function draw(data) {
   lastData = data;
   closeMenu();
+  if (tab === "autopilot" && !hasAutopilot(data)) tab = "work";
   const all = data.sessions || [];
   const here = all.filter(s => spaceOf(s) === tab);
   drawHeader(data, all, here);
@@ -904,9 +1253,12 @@ function draw(data) {
   const q = document.getElementById("filter").value.trim();
   const sessions = here.filter(s => matches(s, q));
   const root = document.getElementById("groups");
-  const recentEl = root.querySelector("details");
+  const recentEl = root.querySelector("details[data-k=recent]");
   if (recentEl && !q) recentOpen = recentEl.open;
+  const apDoneEl = root.querySelector("details[data-k=apdone]");
+  if (apDoneEl && !q) apDoneOpen = apDoneEl.open;
   root.textContent = "";
+  if (tab === "autopilot") return drawAutopilot(data, root, q);
   const cards = CARD_GROUPS.flatMap(g => sessions.filter(s => s.group === g));
   if (cards.length) {
     const grid = el("div", "grid");
@@ -937,6 +1289,7 @@ function draw(data) {
     list.forEach(s => box.append(row(s, data)));
     if (g === "recent") {
       const d = el("details");
+      d.dataset.k = "recent";
       d.open = recentOpen || !!q;
       const sum = el("summary");
       sum.append(h);
@@ -959,7 +1312,9 @@ function draw(data) {
     // A button for each other tab where something matches.
     const p = el("p", "calm", "No session or window here matches “" + q + "”.");
     Object.keys(SPACES).filter(sp => sp !== tab).forEach(other => {
-      const there = all.filter(s => spaceOf(s) === other && matches(s, q)).length +
+      const ap = apData(data) || {};
+      const there = other === "autopilot" ? [...(ap.running || []), ...(ap.finished || [])].filter(s => apMatches(s, q)).length :
+        all.filter(s => spaceOf(s) === other && matches(s, q)).length +
         (data.windows || []).filter(w => winSpace(w) === other && matchesWin(w, q)).length +
         (data.tabs || []).filter(t => t.space === other && matchesTab(t, q)).length;
       if (!there) return;
@@ -1027,10 +1382,11 @@ async function load() {
     // Redraw only on a change (or every 30s for the "5m ago" times), and never under an open
     // menu or dialog, so a click never lands on a card that was just replaced.
     alertChanges(data.sessions || []);
+    apAlerts(data);
     // A terminal's last-output time changes all the time; the 30s redraw keeps it fresh enough.
     const wins = (data.windows || []).map(w => [w.window, w.session, w.index, w.name, w.command, w.cwd]);
     const iterms = (data.tabs || []).map(t => [t.tty, t.name, t.command, t.cwd]);
-    const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, [...fresh]]);
+    const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, data.autopilot, [...fresh]]);
     const busy = !menu.hidden || dlg.open;
     if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
@@ -1073,9 +1429,11 @@ function newMode() {
   document.getElementById("newhint").hidden = !misc;
   document.getElementById("newsubmit").textContent = misc ? "Open in tmux" : "Start in tmux";
   document.getElementById("newname").placeholder = misc ? "short name, e.g. kc-sync" : "short name, e.g. fix-login";
-  // Resume brings back a Claude session, so it isn't offered in the misc tab.
-  document.getElementById("resumebtn").hidden = misc;
-  if (misc) closeResume();
+  // Resume brings back a Claude session, so it isn't offered in the misc tab. Autopilot starts its own.
+  document.getElementById("resumebtn").hidden = misc || tab === "autopilot";
+  btn.hidden = tab === "autopilot";
+  if (misc || tab === "autopilot") closeResume();
+  if (tab === "autopilot") closeNew();
 }
 function openNew() { closeResume(); newMode(); newform.hidden = false; document.getElementById("newname").focus(); }
 function closeNew() { newform.hidden = true; }
@@ -1146,11 +1504,11 @@ document.addEventListener("keydown", e => {
   }
   if (typing) return;
   if (e.key === "/") { e.preventDefault(); filter.focus(); }
-  else if (e.key === "n") {
+  else if (e.key === "n" && tab !== "autopilot") {
     e.preventDefault();
     openNew();
   }
-  else if (e.key === "r" && tab !== "misc") {
+  else if (e.key === "r" && tab !== "misc" && tab !== "autopilot") {
     e.preventDefault();
     openResume();
   }
