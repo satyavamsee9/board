@@ -14,12 +14,12 @@
 <style>
 :root {
   --bg:#f5f5f2; --card:#fff; --ink:#1c1c1e; --muted:#6a6a70; --faint:#9a9aa0; --line:#e3e3de; --hover:#f4f4ef; --chip:#efefea;
-  --needs:#c8281d; --done:#2e7d32; --working:#1769d1; --stopped:#b26500; --idle:#8a8a90; --accent:#1769d1; --fresh:#e06c00;
+  --needs:#c8281d; --done:#2e7d32; --working:#1769d1; --stopped:#b26500; --idle:#8a8a90; --accent:#1769d1; --fresh:#e06c00; --star:#c98a00;
   --shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.05); --pop:0 8px 30px rgba(0,0,0,.16);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#141416; --card:#1d1d20; --ink:#ececef; --muted:#a0a0a7; --faint:#77777e; --line:#2e2e33; --hover:#26262a; --chip:#2a2a2f;
-    --needs:#ff6b60; --done:#7fcb62; --working:#5aa3ff; --stopped:#f2a33a; --idle:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c;
+    --needs:#ff6b60; --done:#7fcb62; --working:#5aa3ff; --stopped:#f2a33a; --idle:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c; --star:#f2c14e;
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25); --pop:0 8px 30px rgba(0,0,0,.5); }
 }
 * { box-sizing:border-box; }
@@ -85,6 +85,14 @@ details > summary { cursor:pointer; list-style:none; }
 details > summary::-webkit-details-marker { display:none; }
 details > summary h2::before { content:"▸"; font-size:11px; }
 details[open] > summary h2::before { content:"▾"; }
+/* A folded section still says what's in it: "1 working, 1 closed". */
+h2 .sumx { font-weight:500; text-transform:none; letter-spacing:0; color:var(--muted); font-size:12.5px; }
+h2 .sumx .hot { color:var(--needs); font-weight:600; }
+.card .star, .row .star { color:var(--star); }
+.row.daylabel { display:block; cursor:default; padding:6px 12px 5px; font-size:12px; font-weight:700; color:var(--muted);
+  background:color-mix(in srgb, var(--chip) 55%, transparent); }
+.row.daylabel:hover { background:color-mix(in srgb, var(--chip) 55%, transparent); }
+.grid.tight { margin-top:0; }
 
 /* Each state has one colour: --c. */
 .needs_you { --c:var(--needs); } .done { --c:var(--done); } .working { --c:var(--working); }
@@ -301,7 +309,7 @@ const UNREACHABLE = LOCAL ? "Board server not reachable. Run: board up"
 const CARD_GROUPS = ["needs_you", "done", "working", "stopped"];
 const ROW_GROUPS = [
   ["idle", "Idle", "Finished, and you've seen it."],
-  ["recent", "Recently closed", "Click to resume in tmux."],
+  ["recent", "Recently closed", "The last 30 days, while Claude still keeps the conversation. Click one to resume it in tmux."],
 ];
 const STATE_HELP = {
   needs_you: "Asking a question or for permission, or the last turn failed.",
@@ -315,7 +323,7 @@ const PILLS = [
   ["stopped", n => n + " stopped"],
 ];
 const STATE_TEXT = { needs_you:"Needs you", failed:"Last turn failed", working:"Working", done:"Done", idle:"Idle",
-  stopped:"Stopped mid-work", closed:"Closed", untracked:"Not running" };
+  stopped:"Stopped mid-work", closed:"Closed", untracked:"Not running", gone:"Conversation deleted" };
 // What stopping a session would cut short, in the words `t k` uses.
 const STOP_WARN = {
   working: "Claude is working in it right now; that work stops where it is.",
@@ -344,7 +352,11 @@ const CONTROLS = ["usage", "tabs", "tools", "keys"];
 let prev = null;
 const fresh = new Set();  // sessions that made a sound and haven't been looked at since
 let lastKey = "", lastDraw = 0, lastData = null;
-let recentOpen = false, apDoneOpen = false, apRoutineOpen = false;
+let apDoneOpen = false, apRoutineOpen = false;
+// Which sections are folded, per tab ("work:idle": false), remembered in this browser only.
+let openState = {};
+try { openState = JSON.parse(localStorage.getItem("boardOpen") || "{}") || {}; } catch (e) {}
+const OPEN_DEFAULT = { fav: true, idle: true, other: true, recent: false };
 let prevCards = null;  // autopilot cards already seen, so only a new one makes a sound
 let alertsOn = false;
 let appRunning = false;
@@ -503,11 +515,19 @@ function openOrResume(s) {
 function clickable(n, s) {
   n.tabIndex = 0;
   n.setAttribute("role", "button");
-  n.title = (isRunning(s) ? "Open its terminal" : "Resume it in tmux") + " · right-click for more";
-  n.addEventListener("click", () => openOrResume(s));
+  // A favorite whose conversation Claude deleted: nothing to resume, so a click offers to remove it.
+  const gone = s.status === "gone";
+  const act = () => {
+    if (!gone) return openOrResume(s);
+    const r = n.getBoundingClientRect();
+    openMenu(s, n, r.left + 16, r.top + 28);
+  };
+  n.title = gone ? "Claude deleted this conversation, so it can't be resumed" :
+    (isRunning(s) ? "Open its terminal" : "Resume it in tmux") + " · right-click for more";
+  n.addEventListener("click", act);
   n.addEventListener("keydown", e => {
     if (e.target !== n) return;
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOrResume(s); }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); }
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       e.preventDefault();
       const r = n.getBoundingClientRect();
@@ -526,7 +546,7 @@ function clickable(n, s) {
     const r = more.getBoundingClientRect();
     openMenu(s, n, r.right - 200, r.bottom + 4);
   });
-  return { go: isRunning(s) ? "Open ↗" : "Resume ↻", more };
+  return { go: gone ? "" : isRunning(s) ? "Open ↗" : "Resume ↻", more };
 }
 
 function stateText(s) {
@@ -543,10 +563,12 @@ function card(s, data) {
   const top = el("div", "top");
   const num = badge(s.where);
   if (num) top.append(num);
-  top.append(el("span", "name", s.name));
+  const nm = el("span", "name", s.name);
+  if (s.favorite) nm.prepend(el("span", "star", "★ "));
+  top.append(nm);
   if (fresh.has(s.id)) { b.classList.add("fresh"); top.append(el("span", "newtag", "new")); }
   const status = el("div", "status");
-  status.append(el("span", "dot"), el("span", "", stateText(s)));
+  status.append(el("span", "dot"), el("span", "", stateText(s) + (s.favorite && !isRunning(s) && s.status !== "gone" ? " · click to resume" : "")));
   if (STATE_HELP[s.group]) status.title = STATE_HELP[s.group];
   const meta = el("div", "meta");
   meta.append(...prLinks(s));
@@ -567,6 +589,47 @@ function fromTag(s) {
   return t;
 }
 
+// A section you can fold: its heading stays, with its count and what's in it ("1 working, 1 closed").
+function section(k, label, count, extra, note, body, q) {
+  const key = tab + ":" + k;
+  const d = el("details", "sec");
+  d.dataset.k = k;
+  d.open = q ? true : key in openState ? !!openState[key] : OPEN_DEFAULT[k];
+  const sum = el("summary"), h = el("h2");
+  h.append(el("span", "", label), el("span", "count", String(count)));
+  if (extra) h.append(extra);
+  sum.append(h);
+  d.append(sum);
+  if (note) d.append(el("p", "note", note));
+  d.append(...body);
+  d.addEventListener("toggle", () => {
+    if (q) return;  // a filter opens everything for a moment; that isn't your choice
+    openState[key] = d.open;
+    try { localStorage.setItem("boardOpen", JSON.stringify(openState)); } catch (e) {}
+  });
+  return d;
+}
+
+// What a folded Favorites holds: "1 needs you, 1 working, 1 closed".
+function favSummary(list) {
+  const n = g => list.filter(s => s.group === g).length;
+  const box = el("span", "sumx");
+  const parts = [[n("needs_you"), "needs you", true], [n("done"), "done", true], [n("working"), "working"],
+    [n("idle"), "idle"], [n("stopped"), "stopped mid-work", true], [n("recent"), "closed"]].filter(([c]) => c);
+  parts.forEach(([c, word, hot], i) => {
+    if (i) box.append(", ");
+    box.append(el("span", hot ? "hot" : "", c + " " + word));
+  });
+  return parts.length ? box : null;
+}
+
+// Recently closed, by when: today, this week, then older.
+function dayLabel(epoch) {
+  const d = new Date((epoch || 0) * 1000), now = new Date();
+  const days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "Earlier this week" : days < 14 ? "Last week" : "Older";
+}
+
 function row(s, data) {
   const r = el("div", "row " + s.group);
   r.dataset.id = s.id;
@@ -578,6 +641,7 @@ function row(s, data) {
   act.append(el("span", "go", go), more);
   const nm = el("span", "name", (s.forked_from ? "↳ " : "") + s.name);
   if (s.forked_from) nm.title = fromTag(s).title;
+  if (s.favorite) nm.prepend(el("span", "star", "★ "));
   r.append(badge(s.where) || el("span"), nm, prs, subline(s, data), el("span", "when", ago(when)), act);
   return r;
 }
@@ -941,7 +1005,9 @@ function closeMenu() {
 
 function openMenu(s, owner, x, y) {
   showMenu(s.id, owner, x, y, add => {
+    if (s.status === "gone") return add("Remove from favorites", () => post("/api/favorite", { id: s.id, on: false }));
     add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
+    add(s.favorite ? "Remove from favorites" : "★ Add to favorites", () => post("/api/favorite", { id: s.id, on: !s.favorite }));
     add("Rename…", () => askRename(s));
     add("Fork…", () => askFork(s));
     if (s.resume) add("Copy resume command", () => copyText(s.resume));
@@ -1253,17 +1319,28 @@ function draw(data) {
   const q = document.getElementById("filter").value.trim();
   const sessions = here.filter(s => matches(s, q));
   const root = document.getElementById("groups");
-  const recentEl = root.querySelector("details[data-k=recent]");
-  if (recentEl && !q) recentOpen = recentEl.open;
   const apDoneEl = root.querySelector("details[data-k=apdone]");
   if (apDoneEl && !q) apDoneOpen = apDoneEl.open;
   root.textContent = "";
   if (tab === "autopilot") return drawAutopilot(data, root, q);
-  const cards = CARD_GROUPS.flatMap(g => sessions.filter(s => s.group === g));
+  // Favorites first, whatever state they're in, and nowhere else on the tab.
+  const favs = sessions.filter(s => s.favorite);
+  if (favs.length) {
+    const order = ["needs_you", "done", "working", "stopped", "idle", "recent"];
+    favs.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || (b.last_activity || 0) - (a.last_activity || 0));
+    const grid = el("div", "grid tight");
+    favs.forEach(s => grid.append(card(s, data)));
+    root.append(section("fav", "★ Favorites", favs.length, favSummary(favs), "", [grid], q));
+  }
+  const rest = sessions.filter(s => !s.favorite);
+  const cards = CARD_GROUPS.flatMap(g => rest.filter(s => s.group === g));
   if (cards.length) {
-    const grid = el("div", "grid");
+    // What needs you, is done or working: never folded, so nothing waiting on you is hidden.
+    const h = el("h2");
+    h.append(el("span", "", "Active"), el("span", "count", String(cards.length)));
+    const grid = el("div", "grid tight");
     cards.forEach(s => grid.append(card(s, data)));
-    root.append(grid);
+    root.append(h, grid);
   } else if (here.length && !q) {
     root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
   }
@@ -1272,34 +1349,28 @@ function draw(data) {
   ROW_GROUPS.forEach(([g, label, note]) => {
     // The other terminals go between Idle and Recently closed: tmux windows, then iTerm tabs.
     if (g === "recent" && wins.length + iterms.length) {
-      const h = el("h2");
-      h.append(el("span", "", tab === "misc" ? "Shells and commands" : "Other terminals"), el("span", "count", String(wins.length + iterms.length)));
       const box = el("div", "rows");
       wins.forEach(w => box.append(winRow(w, data)));
       iterms.forEach(t => box.append(itermRow(t, data)));
-      root.append(h, el("p", "note", tab === "misc"
+      const running = [...wins, ...iterms].filter(w => w.running).length;
+      root.append(section("other", tab === "misc" ? "Shells and commands" : "Other terminals", wins.length + iterms.length,
+        running ? el("span", "sumx", running + " running a command") : null, tab === "misc"
         ? "Every window in the misc tab. Click one to go there. + New tmux window opens another, as t m NAME -- COMMAND does in a terminal; t mv 3 moves window 3 here."
-        : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there."), box);
+        : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there.", [box], q));
     }
-    const list = sessions.filter(s => s.group === g);
+    const list = rest.filter(s => s.group === g);
     if (!list.length) return;
-    const h = el("h2");
-    h.append(el("span", "", label), el("span", "count", String(list.length)));
     const box = el("div", "rows");
-    list.forEach(s => box.append(row(s, data)));
-    if (g === "recent") {
-      const d = el("details");
-      d.dataset.k = "recent";
-      d.open = recentOpen || !!q;
-      const sum = el("summary");
-      sum.append(h);
-      d.append(sum, el("p", "note", note), box);
-      root.append(d);
-    } else {
-      root.append(h);
-      if (note) root.append(el("p", "note", note));
-      root.append(box);
-    }
+    let last = "";
+    list.forEach(s => {
+      if (g === "recent") {  // a long list: by day
+        const day = dayLabel(s.last_activity);
+        if (day !== last) box.append(el("div", "row daylabel", day));
+        last = day;
+      }
+      box.append(row(s, data));
+    });
+    root.append(section(g, label, list.length, null, note, [box], q));
   });
   if (tab === "misc" ? !wins.length && !q : !here.length && !q) {
     const where = folderOf(tab, data);
