@@ -14,12 +14,12 @@
 <style>
 :root {
   --bg:#f5f5f2; --card:#fff; --ink:#1c1c1e; --muted:#6a6a70; --faint:#9a9aa0; --line:#e3e3de; --hover:#f4f4ef; --chip:#efefea;
-  --needs:#c8281d; --done:#2e7d32; --working:#1769d1; --stopped:#b26500; --idle:#8a8a90; --accent:#1769d1; --fresh:#e06c00; --star:#c98a00;
+  --needs:#c8281d; --done:#2e7d32; --working:#1769d1; --stopped:#b26500; --idle:#8a8a90; --accent:#1769d1; --fresh:#e06c00; --star:#c98a00; --merged:#8250df;
   --shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.05); --pop:0 8px 30px rgba(0,0,0,.16);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#141416; --card:#1d1d20; --ink:#ececef; --muted:#a0a0a7; --faint:#77777e; --line:#2e2e33; --hover:#26262a; --chip:#2a2a2f;
-    --needs:#ff6b60; --done:#7fcb62; --working:#5aa3ff; --stopped:#f2a33a; --idle:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c; --star:#f2c14e;
+    --needs:#ff6b60; --done:#7fcb62; --working:#5aa3ff; --stopped:#f2a33a; --idle:#8e8e95; --accent:#5aa3ff; --fresh:#ff9a3c; --star:#f2c14e; --merged:#b48cff;
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25); --pop:0 8px 30px rgba(0,0,0,.5); }
 }
 * { box-sizing:border-box; }
@@ -224,6 +224,7 @@ dialog .dlgcheck input { width:auto; margin:0; }
 .autopanel.off { opacity:.72; }
 .autowhat { font-size:13px; color:var(--muted); }
 .card .runnote { font-size:13px; color:var(--ink); margin-top:2px; padding-right:64px; }
+.card .runnote.said { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .card .about { font-size:12.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:64px; }
 .card.queued, .card.closed { --c:var(--idle); }
 .autopanel details { margin-top:2px; }
@@ -232,10 +233,19 @@ dialog .dlgcheck input { width:auto; margin:0; }
 .autopanel details > summary::before { content:"▸ "; }
 .autopanel details[open] > summary::before { content:"▾ "; }
 .autopanel .rows { margin-top:6px; }
+/* A review's PR: the link, then where the PR is (open, draft, merged, closed) and what you did on GitHub. */
+.pr.ext::after { content:" ↗"; }
+.prst { font-size:11.5px; font-weight:600; padding:0 7px; border-radius:9px; line-height:18px; white-space:nowrap;
+  color:var(--c); background:color-mix(in srgb, var(--c) 13%, transparent); }
+.prst.open { --c:var(--done); } .prst.draft { --c:var(--idle); } .prst.merged { --c:var(--merged); } .prst.closed { --c:var(--needs); }
+.prst.approved { --c:var(--done); } .prst.changes { --c:var(--stopped); } .prst.commented, .prst.dismissed { --c:var(--muted); }
+.row.run .prs { display:flex; gap:6px; align-items:center; }
+.autopanel .autosec { margin-top:6px; }
+.autopanel .autosec .apgrid { margin-top:6px; }
 .row.run { grid-template-columns:72px minmax(0,1fr) auto minmax(0,260px) 116px 84px 30px; }
 .row.run .state { font-size:11.5px; font-weight:700; color:var(--c, var(--muted)); text-transform:uppercase; letter-spacing:.03em; }
 .row.run.missed .state, .row.run.failed .state { --c:var(--needs); }
-.row.run .note { font-size:12.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row.run .note { margin:0; font-size:12.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .row.run .dur { color:var(--faint); font-size:12.5px; text-align:right; white-space:nowrap; }
 .row.run .dur .ghost { padding:2px 8px; font-size:12px; color:var(--ink); }
 .autoerr { color:var(--needs); font-size:13px; margin:10px 0 0; }
@@ -889,8 +899,8 @@ function askWatch(s) {
 // --- automations: Claude sessions the board starts on a schedule or when a check finds work ---
 const autoData = data => (data && data.automations) || [];
 const hasAutomations = data => autoData(data).length > 0 || ((data && data.automation_errors) || []).length > 0;
-const RUN_STATE = { working: "Working", needs_you: "Needs you", done: "Ready for you", idle: "Seen, still open",
-  closed: "Closed, click to reopen", queued: "Waiting its turn", recent: "Done", missed: "Missed", failed: "Didn't start",
+const RUN_STATE = { working: "Working", needs_you: "Needs you", done: "Ready for you", idle: "Session still open",
+  closed: "Unfinished, click to reopen", queued: "Waiting its turn", recent: "Done", missed: "Missed", failed: "Didn't start",
   skipped: "Skipped" };
 const LIVE_RUN = ["needs_you", "done", "working", "idle", "closed", "queued"];
 const RUN_ORDER = ["needs_you", "done", "working", "queued", "idle", "closed"];
@@ -898,7 +908,7 @@ const autoWaiting = data => autoData(data).flatMap(a => (a.runs || []).filter(r 
 const tok = t => !t || !t.total ? "" : (t.total >= 1e6 ? (t.total / 1e6).toFixed(1) + "M" : Math.max(1, Math.round(t.total / 1000)) + "k") + " tokens";
 
 function runMatches(r, q) {
-  return matchesOther([r.title, r.about, r.by, r.note, r.outcome, ...(r.pr ? ["#" + r.pr.number, String(r.pr.number)] : [])], q);
+  return matchesOther([r.title, r.about, r.by, r.note, r.outcome, r.last_said && r.last_said.text, ...(r.pr ? ["#" + r.pr.number, String(r.pr.number)] : [])], q);
 }
 
 function autoButton(text, title, fn) {
@@ -910,6 +920,25 @@ function autoButton(text, title, fn) {
 
 function openRun(r) { post("/api/run", { run: r.id, do: "open" }); }
 
+// A review's PR: its link (a click opens GitHub, not the session), where the PR is, and your review on it.
+const PR_WORD = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" };
+const REVIEW_PILL = { approved: "You approved", changes: "You asked for changes", commented: "You commented", dismissed: "Your review was dismissed" };
+function prBits(r) {
+  if (!r.pr) return [];
+  const out = prLinks({ prs: [r.pr] });
+  out.forEach(a => { a.classList.add("ext"); a.title = "Open #" + r.pr.number + " on GitHub, in a new tab"; });
+  const p = r.pr_state || {};
+  if (PR_WORD[p.state]) {
+    const x = el("span", "prst " + p.state, PR_WORD[p.state]);
+    x.title = "The PR on GitHub" + (p.at ? ", as of " + clock(p.at) : "");
+    out.push(x);
+  }
+  if (REVIEW_PILL[p.review]) out.push(el("span", "prst " + p.review, REVIEW_PILL[p.review]));
+  return out;
+}
+// What a run's line says: the draft's verdict, plus how it ended unless the PR's status already says it.
+const runText = r => [r.note, r.pr_state && r.pr_state.review ? "" : r.outcome].filter(Boolean).join(" · ");
+
 function openRunMenu(r, owner, x, y) {
   showMenu(r.id, owner, x, y, add => {
     if (r.started_at) add("Open", () => openRun(r));
@@ -918,18 +947,22 @@ function openRunMenu(r, owner, x, y) {
     if (r.resume) add("Copy resume command", () => copyText(r.resume));
     if (LIVE_RUN.includes(r.group) && r.group !== "queued") add("Mark done", () => post("/api/run", { run: r.id, do: "done" }));
     if (!OPEN_RUN.includes(r.group)) add("Run again", () => runAgain(r));
+    if (!OPEN_RUN.includes(r.group) && r.pr) add("Run again on Fable 5.2", () => runAgain(r, "fable"));
   });
 }
 
-// On demand, or after a run failed, was missed or was skipped.
+// On demand, or after a run failed, was missed or was skipped. A review runs on Opus 5.5 unless you pick Fable 5.2.
 const OPEN_RUN = ["needs_you", "done", "working", "idle", "queued"];
-function runAgain(r) { post("/api/run", { run: r.id, do: "again" }); }
+function runAgain(r, model) { post("/api/run", model ? { run: r.id, do: "again", model } : { run: r.id, do: "again" }); }
 
 function runCard(r) {
   const b = el("div", "card " + r.group);
   b.dataset.id = r.id;
   b.tabIndex = 0; b.setAttribute("role", "button");
-  b.title = r.started_at ? "Jump into it in the auto tab · right-click for more" : "It starts on its own when a slot frees up";
+  // The model, tokens and start time aren't shown; they're in the tooltip, for a look at what a run cost.
+  const cost = [r.model, tok(r.tokens), r.started_at ? "started " + clock(r.started_at) : ""].filter(Boolean).join(" · ");
+  b.title = (r.started_at ? "Jump into it in the auto tab · right-click for more" : "It starts on its own when a slot frees up") +
+    (cost ? "\n" + cost : "");
   if (r.started_at) {
     b.addEventListener("click", () => openRun(r));
     b.addEventListener("keydown", e => { if (e.target === b && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openRun(r); } });
@@ -940,25 +973,23 @@ function runCard(r) {
   if (num) top.append(num);
   top.append(el("span", "name", r.title + (r.again ? " · again" : "")));
   const status = el("div", "status");
-  status.append(el("span", "dot"), el("span", "", RUN_STATE[r.group] + (r.group === "working" && r.status_since ? " · " + ago(r.status_since).replace(" ago", "") : "")));
+  // Its last state: what the session is doing, and when it last said something.
+  const said = r.last_said && r.last_said.text ? r.last_said : null;
+  const when = r.group === "working" && r.status_since ? " · " + ago(r.status_since).replace(" ago", "")
+    : said && said.at ? " · " + ago(said.at) : "";
+  status.append(el("span", "dot"), el("span", "", RUN_STATE[r.group] + when));
   const meta = el("div", "meta");
-  if (r.pr) meta.append(...prLinks({ prs: [r.pr] }));
+  meta.append(...prBits(r));
   if (r.by) meta.append(el("span", "", "by " + r.by));
-  if (r.started_at) meta.append(el("span", "", "started " + clock(r.started_at)));
-  if (r.model && r.pr) {
-    const m = el("span", "", r.model);
-    m.title = (r.size ? "It's " + r.size + ". " : "") + (r.source === "slack" ? "Found in the review channel." : "GitHub asked for your review.");
-    meta.append(m);
-  }
-  const t = tok(r.tokens);
-  if (t) {
-    const x = el("span", "", t);
-    x.title = Math.round(100 * (r.tokens.cache_read || 0) / r.tokens.total) + "% of them read from the prompt cache";
-    meta.append(x);
-  }
   b.append(top, status, meta);
   if (r.about) { const a = el("div", "about", r.about); a.title = r.about; b.append(a); }
-  if (r.note) b.append(el("div", "runnote", r.note));
+  // What was done: the start of the session's last reply, or the draft's verdict before it has said anything.
+  const line = said ? said.text : r.note;
+  if (line) {
+    const n = el("div", "runnote" + (said ? " said" : ""), line);
+    n.title = line + (said && r.note ? "\nThe draft: " + r.note : "");
+    b.append(n);
+  }
   const more = el("button", "more", "⋯");
   more.type = "button"; more.title = "More";
   more.setAttribute("aria-label", "More actions for " + r.title);
@@ -979,7 +1010,7 @@ function runRow(r) {
   x.addEventListener("contextmenu", e => { e.preventDefault(); openRunMenu(r, x, e.clientX, e.clientY); });
   x.title = r.started_at ? "Click to reopen it in the auto tab" : "";
   const prs = el("span", "prs");
-  if (r.pr) prs.append(...prLinks({ prs: [r.pr] }));
+  prs.append(...prBits(r));
   const ran = span(r.started_at, r.ended_at);
   const more = el("button", "more", "⋯");
   more.type = "button";
@@ -998,15 +1029,25 @@ function runRow(r) {
     dur = el("span", "dur");
     dur.append(autoButton("Run again", "Start it now, in the auto tab", () => runAgain(r)));
   }
-  const note = [r.note, r.outcome].filter(Boolean).join(" · ");
+  const said = r.last_said && r.last_said.text ? r.last_said : null;
+  const note = said ? said.text : runText(r);
   const n = el("span", "note", note);
-  n.title = note;
-  x.append(el("span", "state", RUN_STATE[r.group] || r.group), el("span", "name", r.title), prs, n,
-    el("span", "when", clock(r.started_at || r.created_at)), dur, act);
+  n.title = note + (said && r.note ? "\nThe draft: " + r.note : "");
+  x.append(el("span", "state", ROW_STATE[r.group] || RUN_STATE[r.group] || r.group), el("span", "name", r.title), prs, n,
+    el("span", "when", clock((said && said.at) || r.started_at || r.created_at)), dur, act);
   return x;
 }
 
-let autoEarlierOpen = {};
+const ACTIVE_RUN = ["needs_you", "done", "working", "queued"];
+// Each folds on its own: Idle as cards, Closed as rows.
+// By the run's session, as on the Work tab: Idle while its window is still open (finished or not), as cards;
+// Closed once its window is gone, as rows, with what became of the run in the state column.
+const AUTO_FOLDS = [
+  ["idle", "Idle, session still open", "Their sessions are still open in the auto tab, done or not. Click one to go to it; close its window when you're finished with it.", "cards", r => r.group === "idle"],
+  ["closed", "Closed, last 30 days", "Their sessions are closed. Click one to reopen it in the auto tab.", "rows", r => !ACTIVE_RUN.includes(r.group) && r.group !== "idle"]];
+const ROW_STATE = { closed: "Unfinished" };  // closed before the work was done; a row's state column is narrow
+let autoFoldOpen = {};
+try { autoFoldOpen = JSON.parse(localStorage.getItem("autoFolds") || "{}") || {}; } catch (e) {}
 
 function autoPanel(a, q) {
   const box = el("section", "appanel autopanel" + (a.on ? "" : " off"));
@@ -1027,24 +1068,29 @@ function autoPanel(a, q) {
   if (a.what) box.append(el("div", "autowhat", a.what));
   box.append(el("div", "apfoot", a.status_line + (a.slack && a.slack !== "phone" ? " · pings " + a.slack : " · pings your phone channel")));
   const runs = (a.runs || []).filter(r => runMatches(r, q));
-  const live = runs.filter(r => LIVE_RUN.includes(r.group));
-  live.sort((x, y) => RUN_ORDER.indexOf(x.group) - RUN_ORDER.indexOf(y.group) || (y.started_at || 0) - (x.started_at || 0));
-  if (live.length) {
+  const byOrder = (x, y) => RUN_ORDER.indexOf(x.group) - RUN_ORDER.indexOf(y.group) || (y.started_at || 0) - (x.started_at || 0);
+  // What needs you, is ready or is working: never folded. Then Idle and Closed, each folding on its own.
+  const active = runs.filter(r => ACTIVE_RUN.includes(r.group)).sort(byOrder);
+  if (active.length) {
     const grid = el("div", "grid apgrid");
-    live.forEach(r => grid.append(runCard(r)));
+    active.forEach(r => grid.append(runCard(r)));
     box.append(grid);
   }
-  const earlier = runs.filter(r => !LIVE_RUN.includes(r.group));
-  if (earlier.length) {
-    const d = el("details");
-    d.open = !!q || !!autoEarlierOpen[a.id];
-    d.addEventListener("toggle", () => { if (!q) autoEarlierOpen[a.id] = d.open; });
-    d.append(el("summary", "", "Earlier, last 30 days · " + earlier.length));
-    const rows = el("div", "rows");
-    earlier.forEach(r => rows.append(runRow(r)));
-    d.append(rows);
+  AUTO_FOLDS.forEach(([g, label, help, look, has]) => {
+    const list = runs.filter(has).sort((x, y) => (y.started_at || y.created_at || 0) - (x.started_at || x.created_at || 0));
+    if (!list.length) return;
+    const key = a.id + ":" + g;
+    const d = el("details", "autosec");
+    d.open = !!q || (key in autoFoldOpen ? autoFoldOpen[key] : g === "idle");
+    d.addEventListener("toggle", () => { if (!q) { autoFoldOpen[key] = d.open; try { localStorage.setItem("autoFolds", JSON.stringify(autoFoldOpen)); } catch (e) {} } });
+    const sum = el("summary", "", label + " · " + list.length);
+    sum.title = help;
+    d.append(sum);
+    const body = el("div", look === "rows" ? "rows" : "grid apgrid");
+    list.forEach(r => body.append(look === "rows" ? runRow(r) : runCard(r)));
+    d.append(body);
     box.append(d);
-  }
+  });
   if (!(a.runs || []).length) box.append(el("div", "apfoot", "No runs yet."));
   return box;
 }
@@ -1054,10 +1100,15 @@ function askReview(a) {
   ask({
     title: "Review a PR",
     text: "Paste its link, or just the number for the main repo. The review starts now in the auto tab and waits for you, " +
-      "like the others; drafts too.",
+      "like the others; drafts too. It runs on Opus 5.5.",
     input: "",
+    check: "Use Fable 5.2 instead, for a PR that's really worth it",
     ok: "Review",
-    onOk: () => { const pr = dlgInput.value.trim(); if (pr) post("/api/automation", { id: a.id, do: "review", pr }); },
+    onOk: () => {
+      const pr = dlgInput.value.trim();
+      const fable = document.getElementById("dlgcheck").checked;
+      if (pr) post("/api/automation", fable ? { id: a.id, do: "review", pr, model: "fable" } : { id: a.id, do: "review", pr });
+    },
   });
 }
 
