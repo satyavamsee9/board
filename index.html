@@ -96,8 +96,11 @@ summary:hover h2 .projmore, h2 .projmore:focus-visible, .menu-on.projmore { opac
    Idle and Closed, with the group's label inside, so it's clear what is in what. */
 .proj { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 14px;
   box-shadow:var(--shadow); margin-top:12px; }
-.proj > summary h2, .proj.builtin > h2 { margin:0; font-size:15px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--ink); }
-.proj > summary h2 .count, .proj.builtin > h2 .count { font-size:13px; }
+.proj.flat { margin-top:0; padding-top:2px; }
+.proj.flat > .projbox:first-child { margin-top:10px; }
+details[data-k="projects"] > details.proj:first-of-type { margin-top:0; }
+.proj > summary h2 { margin:0; font-size:15px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--ink); }
+.proj > summary h2 .count { font-size:13px; }
 details.projbox > summary { list-style:none; cursor:pointer; }
 details.projbox > summary .projsub::before { content:"▸"; font-size:10px; color:var(--muted); margin-right:-2px; }
 details.projbox[open] > summary .projsub::before { content:"▾"; }
@@ -405,7 +408,7 @@ let apDoneOpen = false, apRoutineOpen = false;
 // Which sections are folded, per tab ("work:idle": false), remembered in this browser only.
 let openState = {};
 try { openState = JSON.parse(localStorage.getItem("boardOpen") || "{}") || {}; } catch (e) {}
-const OPEN_DEFAULT = { fav: true, idle: true, other: true, recent: false };
+const OPEN_DEFAULT = { fav: true, projects: true, rest: true, other: true };
 let prevCards = null;  // autopilot cards already seen, so only a new one makes a sound
 let alertsOn = false;
 let appRunning = false;
@@ -716,16 +719,13 @@ function draggable(n, s) {
   });
 }
 
-// The built-in box for every session that isn't in a project. It isn't a project: no ⋯, it can't be renamed or
-// deleted, and dropping a session on it takes the session out of its project.
-const OTHERS = { id: "", name: "Not in a project", builtin: true };
-
 const projectsOf = (data, space) => ((data && data.projects) || []).filter(p => p.space === space);
 const projectOf = (s, data) => s.project ? ((data && data.projects) || []).find(p => p.id === s.project) || null : null;
 
 // A project's section: its open sessions as cards, its closed ones as rows by day, and a ⋯ to rename or delete it.
-function projectSection(p, list, data, q) {
-  // Inside: Active and Idle as cards, Closed as rows, each newest first, each in a tinted box with its label.
+// A list's Active and Idle as cards and its Closed as rows, each newest first, each in a tinted box with its label.
+// Closed folds and is remembered (key); closedOpen says whether it starts open.
+function stateGroups(list, data, q, key, closedOpen) {
   const order = ["needs_you", "done", "working", "stopped"];
   const newest = (a, b) => (b.last_activity || 0) - (a.last_activity || 0);
   const body = [];
@@ -742,13 +742,12 @@ function projectSection(p, list, data, q) {
       g.append(h, box);
       return body.push(g);
     }
-    // Closed folds: open in a project, folded in the built-in box (it's 30 days of sessions). Remembered.
-    const key = tab + ":closed:" + (p.id || "others");
+    const k = tab + ":closed:" + key;
     const g = el("details", "projbox closed");
-    g.open = q ? true : key in openState ? !!openState[key] : !p.builtin;
+    g.open = q ? true : k in openState ? !!openState[k] : closedOpen;
     g.addEventListener("toggle", () => {
       if (q) return;
-      openState[key] = g.open;
+      openState[k] = g.open;
       try { localStorage.setItem("boardOpen", JSON.stringify(openState)); } catch (e) {}
     });
     const sumEl = el("summary");
@@ -756,19 +755,23 @@ function projectSection(p, list, data, q) {
     g.append(sumEl, box);
     body.push(g);
   });
+  return body;
+}
+
+// A top-level section whose sessions are split into Active, Idle and Closed, in a white box like a project's.
+function stateSection(k, label, list, data, q, closedOpen, note) {
+  const box = el("div", "proj flat");
+  box.append(...stateGroups(list, data, q, k, closedOpen));
+  const d = section(k, label, list.length, favSummary(list), note || "", [box], q);
+  return d;
+}
+
+function projectSection(p, list, data, q) {
+  const body = stateGroups(list, data, q, p.id, true);
   if (!list.length) body.push(el("p", "projempty", "Empty. Drag a session's card or row here, or pick Move to ▣ " + p.name + " in its ⋯ menu."));
   const extra = el("span");
   const sum = favSummary(list);
   if (sum) extra.append(sum);
-  if (p.builtin) {
-    const d = el("div", "proj builtin");
-    const h = el("h2");
-    h.append(el("span", "", p.name), el("span", "count", String(list.length)), extra);
-    h.title = "Every session on this tab that isn't in one of your projects. Drag one onto a project to move it there.";
-    d.append(h, ...body);
-    dropTarget(d, s => s.project ? { id: s.id, project: "" } : null);
-    return d;
-  }
   const more = el("button", "more projmore", "⋯");
   more.type = "button";
   more.title = "Rename or delete this project";
@@ -1764,26 +1767,26 @@ function draw(data) {
   if (tab === "automations") return drawAutomations(data, root, q);
   // Favorites first, whatever state they're in, and nowhere else on the tab; a favorite in a project shows there.
   const inProj = s => !!projectOf(s, data);
+  // Four sections, each folding: Favorites, Projects, Not in a project, Other terminals. Favorites and Not in a
+  // project split into Active, Idle and Closed, and so does each project inside Projects.
   const favs = sessions.filter(s => s.favorite && !inProj(s));
-  if (favs.length) {
-    const order = ["needs_you", "done", "working", "stopped", "idle", "recent"];
-    favs.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || (b.last_activity || 0) - (a.last_activity || 0));
-    const grid = el("div", "grid tight");
-    favs.forEach(s => grid.append(card(s, data)));
-    root.append(section("fav", "★ Favorites", favs.length, favSummary(favs), "", [grid], q));
-  }
+  if (favs.length) root.append(stateSection("fav", "★ Favorites", favs, data, q, true));
   // Then each of this tab's projects, with its sessions whatever their age; they're nowhere else on the tab.
   const projs = projectsOf(data, tab).map(p => [p, sessions.filter(s => s.project === p.id)]).filter(([, list]) => list.length || !q);
   if (projs.length) {
-    const h = el("h2");
-    h.append(el("span", "", "Projects"), el("span", "count", String(projs.length)));
-    root.append(h);
-    projs.forEach(([p, list]) => root.append(projectSection(p, list, data, q)));
+    const n = projs.reduce((t, [, list]) => t + list.length, 0);
+    root.append(section("projects", "▣ Projects", projs.length, el("span", "sumx", n + " session" + (n === 1 ? "" : "s")), "",
+      projs.map(([p, list]) => projectSection(p, list, data, q)), q));
   }
   // Then every session that isn't in a project: a box like a project's, which the board fills itself. It never
   // folds, since what needs you may be in it.
   const rest = sessions.filter(s => !s.favorite && !inProj(s));
-  if (tab !== "misc" && rest.length) root.append(projectSection(OTHERS, rest, data, q));
+  if (tab !== "misc" && rest.length) {
+    const d = stateSection("rest", "Not in a project", rest, data, q, false);
+    d.querySelector("summary").title = "Every session on this tab that isn't a favorite or in a project. Drag one onto a project to move it there.";
+    dropTarget(d, s => s.project ? { id: s.id, project: "" } : null);  // dropping one here takes it out of its project
+    root.append(d);
+  }
   // Last, the other terminals: tmux windows with no Claude in them, then plain iTerm tabs.
   const wins = (data.windows || []).filter(w => winSpace(w) === tab && matchesWin(w, q));
   const iterms = (data.tabs || []).filter(t => t.space === tab && matchesTab(t, q));
