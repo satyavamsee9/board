@@ -722,7 +722,8 @@ function draggable(n, s) {
 const projectsOf = (data, space) => ((data && data.projects) || []).filter(p => p.space === space);
 const projectOf = (s, data) => s.project ? ((data && data.projects) || []).find(p => p.id === s.project) || null : null;
 
-// A project's section: its open sessions as cards, its closed ones as rows by day, and a ⋯ to rename or delete it.
+// A project's section: its open sessions as cards, its closed ones as rows by day, and a ⋯ to move it up or down
+// among the tab's projects, rename it or delete it.
 // A list's Active and Idle as cards and its Closed as rows, each newest first, each in a tinted box with its label.
 // Closed folds and is remembered (key); closedOpen says whether it starts open.
 function stateGroups(list, data, q, key, closedOpen) {
@@ -774,13 +775,14 @@ function projectSection(p, list, data, q) {
   if (sum) extra.append(sum);
   const more = el("button", "more projmore", "⋯");
   more.type = "button";
-  more.title = "Rename or delete this project";
+  more.title = "Move, rename or delete this project";
   more.setAttribute("aria-label", "More actions for the project " + p.name);
   more.addEventListener("click", e => {
     e.preventDefault(); e.stopPropagation();
     if (menuFor === "proj:" + p.id) return closeMenu();
     const b = more.getBoundingClientRect();
-    openProjectMenu(p, list.length, more, b.left, b.bottom + 4);
+    const mine = projectsOf(data, tab), at = mine.findIndex(x => x.id === p.id);
+    openProjectMenu(p, list.length, at > 0, at < mine.length - 1, more, b.left, b.bottom + 4);
   });
   extra.append(more);
   const d = section("proj:" + p.id, "▣ " + p.name, list.length, extra, "", body, q);
@@ -791,8 +793,10 @@ function projectSection(p, list, data, q) {
   return d;
 }
 
-function openProjectMenu(p, n, owner, x, y) {
+function openProjectMenu(p, n, up, down, owner, x, y) {
   showMenu("proj:" + p.id, owner, x, y, add => {
+    if (up) add("Move up", () => post("/api/project", { project: p.id, move: "up" }));
+    if (down) add("Move down", () => post("/api/project", { project: p.id, move: "down" }));
     add("Rename project…", () => ask({ title: "Rename project", what: p.name, text: "New name:", input: p.name, ok: "Rename",
       onOk: () => { const name = dlgInput.value.trim(); if (name && name !== p.name) post("/api/project", { project: p.id, rename: name }); } }));
     add("Delete project…", () => ask({ title: "Delete project", what: p.name,
