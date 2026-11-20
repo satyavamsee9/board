@@ -94,10 +94,14 @@ summary:hover h2 .projmore, h2 .projmore:focus-visible, .menu-on.projmore { opac
 .dragging { opacity:.45; }
 /* Each project is a box, like an automation's panel: its name on top, then a tinted box for each of its Active,
    Idle and Closed, with the group's label inside, so it's clear what is in what. */
-details.proj { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 14px;
+.proj { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 14px;
   box-shadow:var(--shadow); margin-top:12px; }
-details.proj > summary h2 { margin:0; font-size:15px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--ink); }
-details.proj > summary h2 .count { font-size:13px; }
+.proj > summary h2, .proj.builtin > h2 { margin:0; font-size:15px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--ink); }
+.proj > summary h2 .count, .proj.builtin > h2 .count { font-size:13px; }
+details.projbox > summary { list-style:none; cursor:pointer; }
+details.projbox > summary .projsub::before { content:"▸"; font-size:10px; color:var(--muted); margin-right:-2px; }
+details.projbox[open] > summary .projsub::before { content:"▾"; }
+details.projbox:not([open]) > summary .projsub { margin-bottom:0; }
 .projbox { background:var(--bg); border-radius:10px; padding:10px 12px 12px; margin-top:12px; }
 .projbox .card { box-shadow:none; background:var(--card); }
 .projbox .card .go { background:var(--card); }
@@ -106,12 +110,9 @@ details.proj > summary h2 .count { font-size:13px; }
 .projsub .dot { width:8px; height:8px; border-radius:50%; background:var(--c, var(--idle)); }
 .projbox.active { --c:var(--working); } .projbox.idle { --c:var(--idle); } .projbox.closed { --c:var(--faint); }
 .projempty { margin:12px 0 0; padding:14px 16px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:13px; }
-body.dragging-session details.proj { outline:2px dashed var(--line); outline-offset:3px; }
-body.dragging-session details.proj.drop { outline-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, transparent); }
+body.dragging-session .proj { outline:2px dashed var(--line); outline-offset:3px; }
+body.dragging-session .proj.drop { outline-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, transparent); }
 .card .star, .row .star { color:var(--star); }
-.row.daylabel { display:block; cursor:default; padding:6px 12px 5px; font-size:12px; font-weight:700; color:var(--muted);
-  background:color-mix(in srgb, var(--chip) 55%, transparent); }
-.row.daylabel:hover { background:color-mix(in srgb, var(--chip) 55%, transparent); }
 .grid.tight { margin-top:0; }
 
 /* Each state has one colour: --c. */
@@ -359,12 +360,6 @@ if (!LOCAL) {
 }
 const UNREACHABLE = LOCAL ? "Board server not reachable. Run: board up"
   : "Can't reach the board on this Mac. Start it with t u. If the browser asked about apps and services on this device, choose Allow.";
-// Cards, most urgent first, for sessions that want a look or are running; one-line rows for the rest.
-const CARD_GROUPS = ["needs_you", "done", "working", "stopped"];
-const ROW_GROUPS = [
-  ["idle", "Idle", "Finished, and you've seen it."],
-  ["recent", "Recently closed", "The last 30 days, while Claude still keeps the conversation. Click one to resume it in tmux."],
-];
 const STATE_HELP = {
   needs_you: "Asking a question or for permission, or the last turn failed.",
   done: "Finished its work since you last looked at it.",
@@ -685,6 +680,25 @@ function favSummary(list) {
 // Dragging a session's card or row onto a project moves it there. The board doesn't redraw while you drag.
 const DRAG_TYPE = "application/x-board-session";
 let dragId = null;
+// A box that takes a dropped session: move(s) gives what to post, or null when there's nothing to do.
+function dropTarget(d, move) {
+  d.addEventListener("dragover", e => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    d.classList.add("drop");
+  });
+  d.addEventListener("dragleave", e => { if (!d.contains(e.relatedTarget)) d.classList.remove("drop"); });
+  d.addEventListener("drop", e => {
+    e.preventDefault();
+    d.classList.remove("drop");
+    const sid = e.dataTransfer.getData(DRAG_TYPE) || dragId;
+    const s = ((lastData && lastData.sessions) || []).find(x => x.id === sid);
+    const body = s && move(s);
+    if (body) post("/api/project", body);
+  });
+}
+
 function draggable(n, s) {
   n.draggable = true;
   n.addEventListener("dragstart", e => {
@@ -698,9 +712,13 @@ function draggable(n, s) {
     dragId = null;
     n.classList.remove("dragging");
     document.body.classList.remove("dragging-session");
-    document.querySelectorAll("details.proj.drop").forEach(x => x.classList.remove("drop"));
+    document.querySelectorAll(".proj.drop").forEach(x => x.classList.remove("drop"));
   });
 }
+
+// The built-in box for every session that isn't in a project. It isn't a project: no ⋯, it can't be renamed or
+// deleted, and dropping a session on it takes the session out of its project.
+const OTHERS = { id: "", name: "Not in a project", builtin: true };
 
 const projectsOf = (data, space) => ((data && data.projects) || []).filter(p => p.space === space);
 const projectOf = (s, data) => s.project ? ((data && data.projects) || []).find(p => p.id === s.project) || null : null;
@@ -715,18 +733,42 @@ function projectSection(p, list, data, q) {
    ["Idle", list.filter(s => s.group === "idle").sort(newest), "cards"],
    ["Closed", list.filter(s => s.group === "recent").sort(newest), "rows"]].forEach(([label, group, look]) => {
     if (!group.length) return;
-    const g = el("div", "projbox " + label.toLowerCase());
     const h = el("div", "projsub");
     h.append(el("span", "dot"), el("span", "", label), el("span", "count", String(group.length)));
     const box = el("div", look === "rows" ? "rows" : "grid tight");
     group.forEach(s => box.append(look === "rows" ? row(s, data) : card(s, data)));
-    g.append(h, box);
+    if (label !== "Closed") {
+      const g = el("div", "projbox " + label.toLowerCase());
+      g.append(h, box);
+      return body.push(g);
+    }
+    // Closed folds: open in a project, folded in the built-in box (it's 30 days of sessions). Remembered.
+    const key = tab + ":closed:" + (p.id || "others");
+    const g = el("details", "projbox closed");
+    g.open = q ? true : key in openState ? !!openState[key] : !p.builtin;
+    g.addEventListener("toggle", () => {
+      if (q) return;
+      openState[key] = g.open;
+      try { localStorage.setItem("boardOpen", JSON.stringify(openState)); } catch (e) {}
+    });
+    const sumEl = el("summary");
+    sumEl.append(h);
+    g.append(sumEl, box);
     body.push(g);
   });
   if (!list.length) body.push(el("p", "projempty", "Empty. Drag a session's card or row here, or pick Move to ▣ " + p.name + " in its ⋯ menu."));
   const extra = el("span");
   const sum = favSummary(list);
   if (sum) extra.append(sum);
+  if (p.builtin) {
+    const d = el("div", "proj builtin");
+    const h = el("h2");
+    h.append(el("span", "", p.name), el("span", "count", String(list.length)), extra);
+    h.title = "Every session on this tab that isn't in one of your projects. Drag one onto a project to move it there.";
+    d.append(h, ...body);
+    dropTarget(d, s => s.project ? { id: s.id, project: "" } : null);
+    return d;
+  }
   const more = el("button", "more projmore", "⋯");
   more.type = "button";
   more.title = "Rename or delete this project";
@@ -742,20 +784,7 @@ function projectSection(p, list, data, q) {
   d.classList.add("proj");
   d.querySelector("summary").title = "A project keeps its sessions here whatever their age, closed ones too. " +
     "Drag a card or row here to move it in, or use the session's ⋯ menu.";
-  d.addEventListener("dragover", e => {
-    if (!dragId) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    d.classList.add("drop");
-  });
-  d.addEventListener("dragleave", e => { if (!d.contains(e.relatedTarget)) d.classList.remove("drop"); });
-  d.addEventListener("drop", e => {
-    e.preventDefault();
-    d.classList.remove("drop");
-    const sid = e.dataTransfer.getData(DRAG_TYPE) || dragId;
-    const s = ((lastData && lastData.sessions) || []).find(x => x.id === sid);
-    if (s && s.project !== p.id) post("/api/project", { id: s.id, project: p.id });
-  });
+  dropTarget(d, s => s.project !== p.id ? { id: s.id, project: p.id } : null);
   return d;
 }
 
@@ -782,13 +811,6 @@ function askNewProject() {
   });
 }
 document.getElementById("projbtn").addEventListener("click", askNewProject);
-
-// Recently closed, by when: today, this week, then older.
-function dayLabel(epoch) {
-  const d = new Date((epoch || 0) * 1000), now = new Date();
-  const days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
-  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "Earlier this week" : days < 14 ? "Last week" : "Older";
-}
 
 function row(s, data) {
   const r = el("div", "row " + s.group);
@@ -1758,46 +1780,23 @@ function draw(data) {
     root.append(h);
     projs.forEach(([p, list]) => root.append(projectSection(p, list, data, q)));
   }
+  // Then every session that isn't in a project: a box like a project's, which the board fills itself. It never
+  // folds, since what needs you may be in it.
   const rest = sessions.filter(s => !s.favorite && !inProj(s));
-  const cards = CARD_GROUPS.flatMap(g => rest.filter(s => s.group === g));
-  if (cards.length) {
-    // What needs you, is done or working: never folded, so nothing waiting on you is hidden.
-    const h = el("h2");
-    h.append(el("span", "", "Active"), el("span", "count", String(cards.length)));
-    const grid = el("div", "grid tight");
-    cards.forEach(s => grid.append(card(s, data)));
-    root.append(h, grid);
-  } else if (here.length && !q && !here.some(s => CARD_GROUPS.includes(s.group))) {  // projects' sessions count too
-    root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
-  }
+  if (tab !== "misc" && rest.length) root.append(projectSection(OTHERS, rest, data, q));
+  // Last, the other terminals: tmux windows with no Claude in them, then plain iTerm tabs.
   const wins = (data.windows || []).filter(w => winSpace(w) === tab && matchesWin(w, q));
   const iterms = (data.tabs || []).filter(t => t.space === tab && matchesTab(t, q));
-  ROW_GROUPS.forEach(([g, label, note]) => {
-    // The other terminals go between Idle and Recently closed: tmux windows, then iTerm tabs.
-    if (g === "recent" && wins.length + iterms.length) {
-      const box = el("div", "rows");
-      wins.forEach(w => box.append(winRow(w, data)));
-      iterms.forEach(t => box.append(itermRow(t, data)));
-      const running = [...wins, ...iterms].filter(w => w.running).length;
-      root.append(section("other", tab === "misc" ? "Shells and commands" : "Other terminals", wins.length + iterms.length,
-        running ? el("span", "sumx", running + " running a command") : null, tab === "misc"
-        ? "Every window in the misc tab. Click one to go there. + New tmux window opens another, as t m NAME -- COMMAND does in a terminal; t mv 3 moves window 3 here."
-        : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there.", [box], q));
-    }
-    const list = rest.filter(s => s.group === g);
-    if (!list.length) return;
+  if (wins.length + iterms.length) {
     const box = el("div", "rows");
-    let last = "";
-    list.forEach(s => {
-      if (g === "recent") {  // a long list: by day
-        const day = dayLabel(s.last_activity);
-        if (day !== last) box.append(el("div", "row daylabel", day));
-        last = day;
-      }
-      box.append(row(s, data));
-    });
-    root.append(section(g, label, list.length, null, note, [box], q));
-  });
+    wins.forEach(w => box.append(winRow(w, data)));
+    iterms.forEach(t => box.append(itermRow(t, data)));
+    const running = [...wins, ...iterms].filter(w => w.running).length;
+    root.append(section("other", tab === "misc" ? "Shells and commands" : "Other terminals", wins.length + iterms.length,
+      running ? el("span", "sumx", running + " running a command") : null, tab === "misc"
+      ? "Every window in the misc tab. Click one to go there. + New tmux window opens another, as t m NAME -- COMMAND does in a terminal; t mv 3 moves window 3 here."
+      : "Shells and anything else running in this tab's tmux or a plain iTerm tab, like a port-forward. Click one to go there.", [box], q));
+  }
   if (tab === "misc" ? !wins.length && !q : !here.length && !q) {
     const where = folderOf(tab, data);
     root.append(el("p", "calm", tab === "misc"
