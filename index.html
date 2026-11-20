@@ -92,12 +92,21 @@ h2 .projmore { opacity:.6; margin-left:2px; vertical-align:middle; }
 summary:hover h2 .projmore, h2 .projmore:focus-visible, .menu-on.projmore { opacity:1; }
 /* Dragging a session: each project shows it can take it, and the one under the pointer lights up. */
 .dragging { opacity:.45; }
-/* A project's Active, Idle and Closed: smaller labels than the tab's own, with the same gaps. */
-.projsub { font-size:12px; font-weight:600; color:var(--muted); margin:14px 0 8px; display:flex; gap:6px; }
-.projsub .count { color:var(--faint); }
-details.proj > .projsub:first-of-type { margin-top:2px; }
-.projempty { margin:2px 0 0; padding:14px 16px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:13px; }
-body.dragging-session details.proj { outline:2px dashed var(--line); outline-offset:4px; border-radius:10px; }
+/* Each project is a box, like an automation's panel: its name on top, then a tinted box for each of its Active,
+   Idle and Closed, with the group's label inside, so it's clear what is in what. */
+details.proj { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 14px;
+  box-shadow:var(--shadow); margin-top:12px; }
+details.proj > summary h2 { margin:0; font-size:15px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--ink); }
+details.proj > summary h2 .count { font-size:13px; }
+.projbox { background:var(--bg); border-radius:10px; padding:10px 12px 12px; margin-top:12px; }
+.projbox .card { box-shadow:none; background:var(--card); }
+.projbox .card .go { background:var(--card); }
+.projsub { font-size:12.5px; font-weight:700; color:var(--ink); margin:0 2px 8px; display:flex; align-items:center; gap:7px; }
+.projsub .count { color:var(--faint); font-weight:600; }
+.projsub .dot { width:8px; height:8px; border-radius:50%; background:var(--c, var(--idle)); }
+.projbox.active { --c:var(--working); } .projbox.idle { --c:var(--idle); } .projbox.closed { --c:var(--faint); }
+.projempty { margin:12px 0 0; padding:14px 16px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:13px; }
+body.dragging-session details.proj { outline:2px dashed var(--line); outline-offset:3px; }
 body.dragging-session details.proj.drop { outline-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, transparent); }
 .card .star, .row .star { color:var(--star); }
 .row.daylabel { display:block; cursor:default; padding:6px 12px 5px; font-size:12px; font-weight:700; color:var(--muted);
@@ -698,7 +707,7 @@ const projectOf = (s, data) => s.project ? ((data && data.projects) || []).find(
 
 // A project's section: its open sessions as cards, its closed ones as rows by day, and a ⋯ to rename or delete it.
 function projectSection(p, list, data, q) {
-  // Inside, as on the tab itself: Active and Idle as cards, Closed as rows, each under its own label, newest first.
+  // Inside: Active and Idle as cards, Closed as rows, each newest first, each in a tinted box with its label.
   const order = ["needs_you", "done", "working", "stopped"];
   const newest = (a, b) => (b.last_activity || 0) - (a.last_activity || 0);
   const body = [];
@@ -706,11 +715,13 @@ function projectSection(p, list, data, q) {
    ["Idle", list.filter(s => s.group === "idle").sort(newest), "cards"],
    ["Closed", list.filter(s => s.group === "recent").sort(newest), "rows"]].forEach(([label, group, look]) => {
     if (!group.length) return;
+    const g = el("div", "projbox " + label.toLowerCase());
     const h = el("div", "projsub");
-    h.append(el("span", "", label), el("span", "count", String(group.length)));
+    h.append(el("span", "dot"), el("span", "", label), el("span", "count", String(group.length)));
     const box = el("div", look === "rows" ? "rows" : "grid tight");
     group.forEach(s => box.append(look === "rows" ? row(s, data) : card(s, data)));
-    body.push(h, box);
+    g.append(h, box);
+    body.push(g);
   });
   if (!list.length) body.push(el("p", "projempty", "Empty. Drag a session's card or row here, or pick Move to ▣ " + p.name + " in its ⋯ menu."));
   const extra = el("span");
@@ -1740,10 +1751,13 @@ function draw(data) {
     root.append(section("fav", "★ Favorites", favs.length, favSummary(favs), "", [grid], q));
   }
   // Then each of this tab's projects, with its sessions whatever their age; they're nowhere else on the tab.
-  projectsOf(data, tab).forEach(p => {
-    const list = sessions.filter(s => s.project === p.id);
-    if (list.length || !q) root.append(projectSection(p, list, data, q));
-  });
+  const projs = projectsOf(data, tab).map(p => [p, sessions.filter(s => s.project === p.id)]).filter(([, list]) => list.length || !q);
+  if (projs.length) {
+    const h = el("h2");
+    h.append(el("span", "", "Projects"), el("span", "count", String(projs.length)));
+    root.append(h);
+    projs.forEach(([p, list]) => root.append(projectSection(p, list, data, q)));
+  }
   const rest = sessions.filter(s => !s.favorite && !inProj(s));
   const cards = CARD_GROUPS.flatMap(g => rest.filter(s => s.group === g));
   if (cards.length) {
@@ -1753,7 +1767,7 @@ function draw(data) {
     const grid = el("div", "grid tight");
     cards.forEach(s => grid.append(card(s, data)));
     root.append(h, grid);
-  } else if (here.length && !q) {
+  } else if (here.length && !q && !here.some(s => CARD_GROUPS.includes(s.group))) {  // projects' sessions count too
     root.append(el("p", "calm", "Nothing needs you and nothing is working here right now."));
   }
   const wins = (data.windows || []).filter(w => winSpace(w) === tab && matchesWin(w, q));
