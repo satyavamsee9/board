@@ -88,6 +88,17 @@ details[open] > summary h2::before { content:"▾"; }
 /* A folded section still says what's in it: "1 working, 1 closed". */
 h2 .sumx { font-weight:500; text-transform:none; letter-spacing:0; color:var(--muted); font-size:12.5px; }
 h2 .sumx .hot { color:var(--needs); font-weight:600; }
+h2 .projmore { opacity:.6; margin-left:2px; vertical-align:middle; }
+summary:hover h2 .projmore, h2 .projmore:focus-visible, .menu-on.projmore { opacity:1; }
+/* Dragging a session: each project shows it can take it, and the one under the pointer lights up. */
+.dragging { opacity:.45; }
+/* A project's Active, Idle and Closed: smaller labels than the tab's own, with the same gaps. */
+.projsub { font-size:12px; font-weight:600; color:var(--muted); margin:14px 0 8px; display:flex; gap:6px; }
+.projsub .count { color:var(--faint); }
+details.proj > .projsub:first-of-type { margin-top:2px; }
+.projempty { margin:2px 0 0; padding:14px 16px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:13px; }
+body.dragging-session details.proj { outline:2px dashed var(--line); outline-offset:4px; border-radius:10px; }
+body.dragging-session details.proj.drop { outline-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, transparent); }
 .card .star, .row .star { color:var(--star); }
 .row.daylabel { display:block; cursor:default; padding:6px 12px 5px; font-size:12px; font-weight:700; color:var(--muted);
   background:color-mix(in srgb, var(--chip) 55%, transparent); }
@@ -281,6 +292,7 @@ dialog .dlgcheck input { width:auto; margin:0; }
     <input type="search" id="filter" placeholder="Filter by name, branch, PR, window or command ( / )" aria-label="Filter sessions and windows">
     <span class="grow"></span>
     <button class="ghost" id="alerts" type="button" title="Notify me when a session needs me or finishes">Alerts: off</button>
+    <button class="ghost" id="projbtn" type="button" title="Make a project on this tab, then drag sessions onto it">+ New project</button>
     <button class="ghost" id="resumebtn" type="button" title="Bring back a session you know, in a new tmux window (r)">↻ Resume session</button>
     <button class="primary" id="newbtn" type="button" title="Start a new Claude session in tmux (n)">+ New session</button>
   </div>
@@ -512,12 +524,13 @@ function folderOf(space, data) {
   return ((data && data.folders) || {})[space] || (space === "work" ? (data && data.default_folder) || "" : "");
 }
 
-// The folder, only when it isn't the tab's usual one; then the branch.
+// The folder and its branch, only when it isn't the tab's usual folder (the main checkout). There every session is
+// on the same branch, so it says nothing about the session; the tooltip still has both.
 function subline(s, data) {
   const folder = shortPath(s.cwd);
   const usual = !folder || folder === folderOf(spaceOf(s), data);
   const branch = shortBranch(s.branch);
-  const text = usual ? branch : folder + (branch ? "  " + branch : "");
+  const text = usual ? "" : folder + (branch ? "  " + branch : "");
   const n = el("span", "sub", text);
   n.title = [s.cwd, s.branch].filter(Boolean).join("\n");
   return n;
@@ -548,7 +561,8 @@ function openOrResume(s) {
 function clickable(n, s) {
   n.tabIndex = 0;
   n.setAttribute("role", "button");
-  // A favorite whose conversation Claude deleted: nothing to resume, so a click offers to remove it.
+  // A favorite or a project's session whose conversation Claude deleted: nothing to resume, so a click offers to
+  // remove it.
   const gone = s.status === "gone";
   const act = () => {
     if (!gone) return openOrResume(s);
@@ -558,6 +572,7 @@ function clickable(n, s) {
   n.title = gone ? "Claude deleted this conversation, so it can't be resumed" :
     (isRunning(s) ? "Open its terminal" : "Resume it in tmux") + " · right-click for more";
   n.addEventListener("click", act);
+  if (projectsOf(lastData, spaceOf(s)).length) draggable(n, s);
   n.addEventListener("keydown", e => {
     if (e.target !== n) return;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); }
@@ -627,7 +642,7 @@ function section(k, label, count, extra, note, body, q) {
   const key = tab + ":" + k;
   const d = el("details", "sec");
   d.dataset.k = k;
-  d.open = q ? true : key in openState ? !!openState[key] : OPEN_DEFAULT[k];
+  d.open = q ? true : key in openState ? !!openState[key] : k.startsWith("proj:") || OPEN_DEFAULT[k];
   const sum = el("summary"), h = el("h2");
   h.append(el("span", "", label), el("span", "count", String(count)));
   if (extra) h.append(extra);
@@ -655,6 +670,107 @@ function favSummary(list) {
   });
   return parts.length ? box : null;
 }
+
+// --- projects: sessions you group by hand, kept whatever their age --------------------------------
+
+// Dragging a session's card or row onto a project moves it there. The board doesn't redraw while you drag.
+const DRAG_TYPE = "application/x-board-session";
+let dragId = null;
+function draggable(n, s) {
+  n.draggable = true;
+  n.addEventListener("dragstart", e => {
+    dragId = s.id;
+    e.dataTransfer.setData(DRAG_TYPE, s.id);
+    e.dataTransfer.effectAllowed = "move";
+    n.classList.add("dragging");
+    document.body.classList.add("dragging-session");
+  });
+  n.addEventListener("dragend", () => {
+    dragId = null;
+    n.classList.remove("dragging");
+    document.body.classList.remove("dragging-session");
+    document.querySelectorAll("details.proj.drop").forEach(x => x.classList.remove("drop"));
+  });
+}
+
+const projectsOf = (data, space) => ((data && data.projects) || []).filter(p => p.space === space);
+const projectOf = (s, data) => s.project ? ((data && data.projects) || []).find(p => p.id === s.project) || null : null;
+
+// A project's section: its open sessions as cards, its closed ones as rows by day, and a ⋯ to rename or delete it.
+function projectSection(p, list, data, q) {
+  // Inside, as on the tab itself: Active and Idle as cards, Closed as rows, each under its own label, newest first.
+  const order = ["needs_you", "done", "working", "stopped"];
+  const newest = (a, b) => (b.last_activity || 0) - (a.last_activity || 0);
+  const body = [];
+  [["Active", list.filter(s => order.includes(s.group)).sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || newest(a, b)), "cards"],
+   ["Idle", list.filter(s => s.group === "idle").sort(newest), "cards"],
+   ["Closed", list.filter(s => s.group === "recent").sort(newest), "rows"]].forEach(([label, group, look]) => {
+    if (!group.length) return;
+    const h = el("div", "projsub");
+    h.append(el("span", "", label), el("span", "count", String(group.length)));
+    const box = el("div", look === "rows" ? "rows" : "grid tight");
+    group.forEach(s => box.append(look === "rows" ? row(s, data) : card(s, data)));
+    body.push(h, box);
+  });
+  if (!list.length) body.push(el("p", "projempty", "Empty. Drag a session's card or row here, or pick Move to ▣ " + p.name + " in its ⋯ menu."));
+  const extra = el("span");
+  const sum = favSummary(list);
+  if (sum) extra.append(sum);
+  const more = el("button", "more projmore", "⋯");
+  more.type = "button";
+  more.title = "Rename or delete this project";
+  more.setAttribute("aria-label", "More actions for the project " + p.name);
+  more.addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();
+    if (menuFor === "proj:" + p.id) return closeMenu();
+    const b = more.getBoundingClientRect();
+    openProjectMenu(p, list.length, more, b.left, b.bottom + 4);
+  });
+  extra.append(more);
+  const d = section("proj:" + p.id, "▣ " + p.name, list.length, extra, "", body, q);
+  d.classList.add("proj");
+  d.querySelector("summary").title = "A project keeps its sessions here whatever their age, closed ones too. " +
+    "Drag a card or row here to move it in, or use the session's ⋯ menu.";
+  d.addEventListener("dragover", e => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    d.classList.add("drop");
+  });
+  d.addEventListener("dragleave", e => { if (!d.contains(e.relatedTarget)) d.classList.remove("drop"); });
+  d.addEventListener("drop", e => {
+    e.preventDefault();
+    d.classList.remove("drop");
+    const sid = e.dataTransfer.getData(DRAG_TYPE) || dragId;
+    const s = ((lastData && lastData.sessions) || []).find(x => x.id === sid);
+    if (s && s.project !== p.id) post("/api/project", { id: s.id, project: p.id });
+  });
+  return d;
+}
+
+function openProjectMenu(p, n, owner, x, y) {
+  showMenu("proj:" + p.id, owner, x, y, add => {
+    add("Rename project…", () => ask({ title: "Rename project", what: p.name, text: "New name:", input: p.name, ok: "Rename",
+      onOk: () => { const name = dlgInput.value.trim(); if (name && name !== p.name) post("/api/project", { project: p.id, rename: name }); } }));
+    add("Delete project…", () => ask({ title: "Delete project", what: p.name,
+      text: "Its " + n + " session" + (n === 1 ? "" : "s") + " go back to the usual sections of the board. Nothing is closed or deleted.",
+      ok: "Delete project", danger: true, onOk: () => post("/api/project", { project: p.id, delete: true }) }), "bad");
+  });
+}
+
+// + New project: an empty project on this tab. You move sessions into it; nothing goes in by itself.
+function askNewProject() {
+  ask({
+    title: "New project",
+    what: SPACES[tab],
+    text: "A project on the " + SPACES[tab] + " tab. Drag sessions' cards or rows onto it, or use a session's ⋯ menu. " +
+      "Its sessions stay there whatever their age, closed ones too, until you take them out.",
+    input: "",
+    ok: "Make project",
+    onOk: () => { const name = dlgInput.value.trim(); if (name) post("/api/project", { create: name, space: tab }); },
+  });
+}
+document.getElementById("projbtn").addEventListener("click", askNewProject);
 
 // Recently closed, by when: today, this week, then older.
 function dayLabel(epoch) {
@@ -1261,9 +1377,17 @@ function closeMenu() {
 
 function openMenu(s, owner, x, y) {
   showMenu(s.id, owner, x, y, add => {
-    if (s.status === "gone") return add("Remove from favorites", () => post("/api/favorite", { id: s.id, on: false }));
+    const proj = projectOf(s, lastData);
+    if (s.status === "gone") {
+      if (s.favorite) add("Remove from favorites", () => post("/api/favorite", { id: s.id, on: false }));
+      if (proj) add("Take out of " + proj.name, () => post("/api/project", { id: s.id, project: "" }));
+      return;
+    }
     add(isRunning(s) ? "Open its terminal" : "Resume in tmux", () => openOrResume(s));
     add(s.favorite ? "Remove from favorites" : "★ Add to favorites", () => post("/api/favorite", { id: s.id, on: !s.favorite }));
+    projectsOf(lastData, spaceOf(s)).filter(p => p.id !== s.project)
+      .forEach(p => add("Move to ▣ " + p.name, () => post("/api/project", { id: s.id, project: p.id })));
+    if (proj) add("Take out of " + proj.name, () => post("/api/project", { id: s.id, project: "" }));
     add("Rename…", () => askRename(s));
     add("Fork…", () => askFork(s));
     if (s.resume) add("Copy resume command", () => copyText(s.resume));
@@ -1453,6 +1577,7 @@ function matches(s, q) {
   if (!q) return true;
   const w = s.where || {};
   const hay = [s.name, s.claude_name, (s.forked_from || {}).name, s.branch, shortPath(s.cwd), w.index, w.window_name, s.id,
+    (projectOf(s, lastData) || {}).name,
     ...(s.prs || []).map(p => "#" + p.number + " " + p.number)].filter(Boolean).join(" ").toLowerCase();
   return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
 }
@@ -1604,8 +1729,9 @@ function draw(data) {
   root.textContent = "";
   if (tab === "autopilot") return drawAutopilot(data, root, q);
   if (tab === "automations") return drawAutomations(data, root, q);
-  // Favorites first, whatever state they're in, and nowhere else on the tab.
-  const favs = sessions.filter(s => s.favorite);
+  // Favorites first, whatever state they're in, and nowhere else on the tab; a favorite in a project shows there.
+  const inProj = s => !!projectOf(s, data);
+  const favs = sessions.filter(s => s.favorite && !inProj(s));
   if (favs.length) {
     const order = ["needs_you", "done", "working", "stopped", "idle", "recent"];
     favs.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || (b.last_activity || 0) - (a.last_activity || 0));
@@ -1613,7 +1739,12 @@ function draw(data) {
     favs.forEach(s => grid.append(card(s, data)));
     root.append(section("fav", "★ Favorites", favs.length, favSummary(favs), "", [grid], q));
   }
-  const rest = sessions.filter(s => !s.favorite);
+  // Then each of this tab's projects, with its sessions whatever their age; they're nowhere else on the tab.
+  projectsOf(data, tab).forEach(p => {
+    const list = sessions.filter(s => s.project === p.id);
+    if (list.length || !q) root.append(projectSection(p, list, data, q));
+  });
+  const rest = sessions.filter(s => !s.favorite && !inProj(s));
   const cards = CARD_GROUPS.flatMap(g => rest.filter(s => s.group === g));
   if (cards.length) {
     // What needs you, is done or working: never folded, so nothing waiting on you is hidden.
@@ -1740,7 +1871,7 @@ async function load() {
     const iterms = (data.tabs || []).map(t => [t.tty, t.name, t.command, t.cwd]);
     const key = JSON.stringify([data.sessions, wins, iterms, data.live_ok, data.error, data.usage, data.autopilot, data.automations,
       data.automation_errors, [...fresh]]);
-    const busy = !menu.hidden || dlg.open;
+    const busy = !menu.hidden || dlg.open || !!dragId;
     if (!busy && (key !== lastKey || Date.now() - lastDraw > 30000)) {
       draw(data);
       lastKey = key; lastDraw = Date.now();
@@ -1785,6 +1916,7 @@ function newMode() {
   // Resume brings back a Claude session, so it isn't offered in the misc tab. Autopilot starts its own.
   const own = tab === "autopilot" || tab === "automations";  // these start their own sessions
   document.getElementById("resumebtn").hidden = misc || own;
+  document.getElementById("projbtn").hidden = misc || own;  // projects are on Work and Personal only
   btn.hidden = own;
   if (misc || own) closeResume();
   if (own) closeNew();
